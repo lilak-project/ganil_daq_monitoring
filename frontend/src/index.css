@@ -1,0 +1,17 @@
+@import "@fontsource-variable/geist-mono";
+
+:root {
+  color-scheme: light;
+}
+
+body {
+  /* A plain white page: the only boxes on it are the ones that mean something. */
+  background: var(--mantine-color-white);
+}
+
+/* The live readouts update every couple of seconds. Tabular figures keep the
+   elapsed time and the size from reflowing as their digits change, which on a
+   wall display reads as the panel twitching. */
+[data-mono], .mantine-Text-root[style*="monospace"] {
+  font-variant-numeric: tabular-nums;
+}

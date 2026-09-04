@@ -1,0 +1,219 @@
+"""The run catalog: what was taken, when, and where it landed.
+
+An **attempt** is one `Started run #N` .. `Stopped run #N` pair from the GUI log.
+It is the unit here rather than the run number, because the number is not
+unique: a run started with storage off writes nothing and does not advance the
+counter, so `#3` can appear three times in an afternoon with three different
+notes. Two attempts at the same number are told apart by the file they wrote.
+
+A run's data is not one file. NARVAL rolls the storage over at a size limit, so
+run 57 is ``run_0057.dat.28-08-26_08h09m37s`` plus ``….1``, ``….2`` and so on;
+the run's size is their sum, and ``cobo-frame-merge`` is what puts them back
+together. `merged/` holds the results of that, ``.gmer``, and those are not run
+data -- counting them would double every merged run.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import asdict, dataclass, field
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from .rcclog import GuiEvent, StorageEvent
+
+#: ``run_0081.dat.01-09-26_05h42m54s`` and its ``.1``, ``.2``… continuations.
+_DATA_FILE = re.compile(
+    r"^run_(?P<run>\d+)\.dat\."
+    r"(?P<day>\d{2})-(?P<month>\d{2})-(?P<year>\d{2})_"
+    r"(?P<h>\d{2})h(?P<m>\d{2})m(?P<s>\d{2})s"
+    r"(?:\.(?P<part>\d+))?$"
+)
+
+#: How far from an attempt's start its file may be stamped and still be its
+#: file. Storage opens a few seconds BEFORE the GUI logs the start (the run
+#: control starts NARVAL, then says so), and a slow ECC init stretches that.
+#: Five minutes is far longer than any observed gap and far shorter than the
+#: gap between two attempts at the same number.
+MATCH_WINDOW = timedelta(minutes=5)
+
+
+@dataclass
+class DataFile:
+    """One file on disk, and the run it belongs to."""
+
+    name: str
+    run: int
+    started: datetime
+    part: int
+    size: int
+    modified: datetime
+
+    def as_dict(self) -> dict:
+        data = asdict(self)
+        data["started"] = self.started.isoformat()
+        data["modified"] = self.modified.isoformat()
+        return data
+
+
+def scan_data_files(run_dir: Path) -> list[DataFile]:
+    """Every raw data file in the run directory, newest run first.
+
+    `merged/` is a subdirectory and is not walked: those are ``.gmer`` products
+    of the raw files beside them, not runs of their own.
+    """
+    files: list[DataFile] = []
+    try:
+        entries = list(run_dir.iterdir())
+    except OSError:
+        return files
+
+    for entry in entries:
+        match = _DATA_FILE.match(entry.name)
+        if not match:
+            continue
+        try:
+            stat = entry.stat()
+        except OSError:
+            continue                      # vanished between listing and stat
+        try:
+            started = datetime(
+                2000 + int(match.group("year")), int(match.group("month")),
+                int(match.group("day")), int(match.group("h")),
+                int(match.group("m")), int(match.group("s")), tzinfo=timezone.utc,
+            )
+        except ValueError:
+            continue
+        files.append(DataFile(
+            name=entry.name,
+            run=int(match.group("run")),
+            started=started,
+            part=int(match.group("part") or 0),
+            size=stat.st_size,
+            modified=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+        ))
+    files.sort(key=lambda f: (f.started, f.part))
+    return files
+
+
+@dataclass
+class Attempt:
+    """One Started..Stopped pair, with whatever it wrote."""
+
+    run: int
+    started: datetime
+    note: str = ""
+    stopped: datetime | None = None
+    #: Files this attempt wrote, base first. Empty when storage was off.
+    files: list[DataFile] = field(default_factory=list)
+    #: True once rcc.txt confirms storage was off for it -- as opposed to a
+    #: file we simply have not found, which is a different sentence to print.
+    storage_off: bool = False
+
+    @property
+    def is_live(self) -> bool:
+        return self.stopped is None
+
+    @property
+    def duration_s(self) -> float | None:
+        if self.stopped is None:
+            return None
+        return (self.stopped - self.started).total_seconds()
+
+    @property
+    def size(self) -> int:
+        return sum(f.size for f in self.files)
+
+    def as_dict(self, now: datetime | None = None) -> dict:
+        elapsed = self.duration_s
+        if elapsed is None and now is not None:
+            elapsed = (now - self.started).total_seconds()
+        return {
+            "run": self.run,
+            "started": self.started.isoformat(),
+            "stopped": self.stopped.isoformat() if self.stopped else None,
+            "note": self.note,
+            "live": self.is_live,
+            "elapsed_s": elapsed,
+            "size": self.size,
+            "storage_off": self.storage_off,
+            "files": [f.as_dict() for f in self.files],
+        }
+
+
+def build_attempts(events: list[GuiEvent], files: list[DataFile],
+                   storage: list[StorageEvent] | None = None) -> list[Attempt]:
+    """Pair the GUI's starts and stops, then hang the data files off them.
+
+    A start with no stop is the live run. A start followed by another start --
+    which happens when the run control is restarted mid-run -- closes the first
+    one at the second's timestamp, because a run whose successor has begun is
+    over whatever the log failed to say.
+    """
+    attempts: list[Attempt] = []
+    open_attempt: Attempt | None = None
+
+    for event in events:
+        if event.kind == "started":
+            if open_attempt is not None:
+                open_attempt.stopped = event.time
+            open_attempt = Attempt(run=event.run or 0, started=event.time, note=event.note)
+            attempts.append(open_attempt)
+        elif event.kind == "stopped" and open_attempt is not None:
+            # The run number is checked loosely: a stop that names a different
+            # number than the open start still ends it, because there is only
+            # ever one run going.
+            open_attempt.stopped = event.time
+            open_attempt = None
+
+    _attach_files(attempts, files)
+    _attach_storage(attempts, storage or [])
+    return attempts
+
+
+def _attach_files(attempts: list[Attempt], files: list[DataFile]) -> None:
+    """Give every file to the attempt it belongs to.
+
+    Matched on run number and then on time, because the run number alone is
+    ambiguous. The continuation parts (``.1``, ``.2``…) carry the base file's
+    timestamp in their own name, so they land on the same attempt without
+    needing to be traced through it.
+    """
+    by_run: dict[int, list[Attempt]] = {}
+    for attempt in attempts:
+        by_run.setdefault(attempt.run, []).append(attempt)
+
+    for data in files:
+        candidates = by_run.get(data.run)
+        if not candidates:
+            continue
+        best, best_gap = None, MATCH_WINDOW
+        for attempt in candidates:
+            gap = abs(data.started - attempt.started)
+            if gap <= best_gap:
+                best, best_gap = attempt, gap
+        if best is not None:
+            best.files.append(data)
+
+    for attempt in attempts:
+        attempt.files.sort(key=lambda f: f.part)
+
+
+def _attach_storage(attempts: list[Attempt], storage: list[StorageEvent]) -> None:
+    """Mark the attempts rcc.txt says stored nothing.
+
+    The ``storage mode was off`` line carries no run number, so it is matched to
+    whichever attempt was open when it was written.
+    """
+    offs = [event.time for event in storage if event.mode == "off"]
+    if not offs:
+        return
+    for attempt in attempts:
+        if attempt.files:
+            continue
+        end = attempt.stopped or (attempt.started + timedelta(days=1))
+        # A little slack at the end: the storage actor is stopped a few seconds
+        # after the GUI logs the stop.
+        end = end + timedelta(seconds=30)
+        if any(attempt.started <= off <= end for off in offs):
+            attempt.storage_off = True
