@@ -360,7 +360,9 @@ def run_started(attempt: Attempt) -> None:
     else:
         lines += ["", "(started with no note)"]
 
-    _push(LOG_TYPE_START, attempt.run, f"Run {attempt.run}", "\n".join(lines),
+    # The DAQ's name in the title: a logbook carries several systems' runs and
+    # "Run 150" alone does not say whose.
+    _push(LOG_TYPE_START, attempt.run, f"GANIL DAQ · Run {attempt.run}", "\n".join(lines),
           {"run_number": _number(attempt.run), "note": attempt.note})
 
 
@@ -380,8 +382,10 @@ def run_ended(attempt: Attempt) -> None:
     if attempt.note:
         lines += ["", attempt.note]
 
-    _push(LOG_TYPE_END, attempt.run, "", "\n".join(lines),
-          {"run_number": _number(attempt.run)})
+    # This went up with an EMPTY title, so the end of a run — the entry you most
+    # want to find — was a blank row in the list.
+    _push(LOG_TYPE_END, attempt.run, f"GANIL DAQ · Run {attempt.run} — finished",
+          "\n".join(lines), {"run_number": _number(attempt.run)})
 
 
 #: Set by install(). The request path reads it; nothing here polls.
