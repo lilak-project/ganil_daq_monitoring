@@ -87,6 +87,23 @@ async def health() -> dict:
     }
 
 
+@app.get("/api/live", tags=["meta"], summary="Compact numbers for the portal's live mode")
+async def live() -> dict:
+    snap = monitor.snapshot()
+    live_run = snap.get("live")
+    if live_run:
+        items = [{"label": "run", "value": str(live_run.get("run")), "unit": "", "state": "running",
+                  "sub": f"{int(live_run.get('elapsed_s') or 0) // 60} min"}]
+        rate = snap.get("rate_bytes_per_s")
+        if rate:
+            items.append({"label": "rate", "value": f"{float(rate) / 1e6:.2f}", "unit": "MB/s", "state": "running"})
+    else:
+        last = next(iter(monitor.attempts(limit=1)), None)
+        items = [{"label": "last run", "value": str(getattr(last, "run", None) or "—"), "unit": "",
+                  "state": "idle" if snap.get("daq_up") else "down", "sub": "DAQ up" if snap.get("daq_up") else "DAQ down"}]
+    return {"ok": True, "items": items}
+
+
 @app.get("/api/status", tags=["run"], summary="The run going now, and the DAQ's components")
 async def status() -> dict:
     return monitor.snapshot()
