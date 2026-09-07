@@ -203,6 +203,23 @@ class Monitor:
             return
         self._rate.append((time.time(), live.size))
 
+    def rate_history(self, points: int = 60) -> list[float]:
+        """Write rate between consecutive samples, in MB/s, newest last.
+
+        The deque holds (time, total size); a rate needs the difference, and a
+        size that went backwards (a new run, a truncated file) is a break, not
+        a negative rate, so it is dropped rather than drawn.
+        """
+        with self._lock:
+            samples = list(self._rate)
+        rates: list[float] = []
+        for (t0, s0), (t1, s1) in zip(samples, samples[1:]):
+            span = t1 - t0
+            if span <= 0 or s1 < s0:
+                continue
+            rates.append((s1 - s0) / span / 1e6)
+        return rates[-points:]
+
     def rate_bytes_per_s(self) -> float | None:
         """Write rate of the live run over the samples held, or None.
 

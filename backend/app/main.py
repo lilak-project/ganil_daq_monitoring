@@ -89,6 +89,9 @@ async def health() -> dict:
 
 @app.get("/api/live", tags=["meta"], summary="Compact numbers for the portal's live mode")
 async def live() -> dict:
+    """The run going (or the last one), and the write rate with its recent
+    history behind the number -- the same samples rate_bytes_per_s averages,
+    turned into a rate per step so the shape is the rate's, not the file's."""
     snap = monitor.snapshot()
     live_run = snap.get("live")
     if live_run:
@@ -96,7 +99,8 @@ async def live() -> dict:
                   "sub": f"{int(live_run.get('elapsed_s') or 0) // 60} min"}]
         rate = snap.get("rate_bytes_per_s")
         if rate:
-            items.append({"label": "rate", "value": f"{float(rate) / 1e6:.2f}", "unit": "MB/s", "state": "running"})
+            items.append({"label": "rate", "value": f"{float(rate) / 1e6:.2f}", "unit": "MB/s", "state": "running",
+                          "spark": monitor.rate_history(), "spark_window": "run"})
     else:
         last = next(iter(monitor.attempts(limit=1)), None)
         items = [{"label": "last run", "value": str(getattr(last, "run", None) or "—"), "unit": "",
