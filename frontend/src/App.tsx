@@ -45,6 +45,7 @@ type Attempt = {
   elapsed_s: number | null
   size: number
   storage_off: boolean
+  from_server_log: boolean
   files: DataFile[]
 }
 
@@ -302,6 +303,16 @@ export default function App() {
                       {attempt.live && (
                         <Badge size="xs" color="teal" variant="light">
                           live
+                        </Badge>
+                      )}
+                      {attempt.from_server_log && (
+                        <Badge
+                          size="xs"
+                          color="gray"
+                          variant="light"
+                          title="The run-control GUI never logged this run; it was recovered from the server log (rcc.txt), which is why it has no note."
+                        >
+                          server log
                         </Badge>
                       )}
                     </Group>

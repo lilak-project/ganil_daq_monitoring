@@ -109,6 +109,11 @@ class Attempt:
     #: True once rcc.txt confirms storage was off for it -- as opposed to a
     #: file we simply have not found, which is a different sentence to print.
     storage_off: bool = False
+    #: True when the GUI log never recorded this run and it was recovered from
+    #: the run-control server's log instead. Such an attempt has no note --
+    #: the note only ever exists in the GUI log -- and the UI says where it
+    #: came from rather than showing a run with a silently empty note.
+    from_server_log: bool = False
 
     @property
     def is_live(self) -> bool:
@@ -137,6 +142,7 @@ class Attempt:
             "elapsed_s": elapsed,
             "size": self.size,
             "storage_off": self.storage_off,
+            "from_server_log": self.from_server_log,
             "files": [f.as_dict() for f in self.files],
         }
 
@@ -166,9 +172,64 @@ def build_attempts(events: list[GuiEvent], files: list[DataFile],
             open_attempt.stopped = event.time
             open_attempt = None
 
+    attempts = _recover_missing(attempts, storage or [])
     _attach_files(attempts, files)
     _attach_storage(attempts, storage or [])
     return attempts
+
+
+def _recover_missing(attempts: list[Attempt], storage: list[StorageEvent]) -> list[Attempt]:
+    """Add the runs the GUI log never recorded, from the server log.
+
+    The GUI drops a start line now and then -- twice in three weeks here, run
+    #38 and run #203 -- and when it does, the run is invisible: no row, no live
+    view, nothing pushed to the logbook, while the DAQ writes the file quite
+    happily. rcc.txt always has it, because the server cannot start storage
+    without saying so.
+
+    The GUI log stays the authority wherever it HAS the run: it is what the
+    operator saw, and it is the only place the note exists. This fills gaps and
+    never overrides. A recovered attempt is marked, because an empty note on it
+    means "the GUI never wrote one", not "the operator left it blank".
+    """
+    starts = [event for event in storage if event.mode == "starting" and event.run is not None]
+    if not starts:
+        return attempts
+
+    recovered: list[Attempt] = []
+    for index, event in enumerate(starts):
+        if any(a.run == event.run and abs(a.started - event.time) <= MATCH_WINDOW
+               for a in attempts):
+            continue                      # the GUI has this one
+        # It ends where the server says storage stopped, or where the next run
+        # began -- a run whose successor has started is over, whatever was or
+        # was not logged.
+        stopped = None
+        for later in storage:
+            if later.time <= event.time or later.mode == "starting":
+                continue
+            if later.run is not None and later.run != event.run:
+                continue
+            stopped = later.time
+            break
+        following = starts[index + 1].time if index + 1 < len(starts) else None
+        if following is not None and (stopped is None or following < stopped):
+            stopped = following
+        recovered.append(Attempt(run=event.run, started=event.time, stopped=stopped,
+                                 from_server_log=True))
+
+    if not recovered:
+        return attempts
+    merged = attempts + recovered
+    merged.sort(key=lambda a: a.started)
+    # The same rule the GUI pairing uses, now across both sources: an attempt
+    # whose successor has begun is over, whichever log failed to say so. Without
+    # this a GUI start with no stop would stay "live" forever behind a recovered
+    # run, and two runs would be going at once.
+    for attempt, following in zip(merged, merged[1:]):
+        if attempt.stopped is None or attempt.stopped > following.started:
+            attempt.stopped = following.started
+    return merged
 
 
 def _attach_files(attempts: list[Attempt], files: list[DataFile]) -> None:
