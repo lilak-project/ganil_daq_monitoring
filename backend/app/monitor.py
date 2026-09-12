@@ -278,7 +278,16 @@ class Monitor:
         # A start is announced once its note has settled.
         if self._key(latest) != self._announced_start:
             open_event = self._open_event
-            settled = latest.stopped is not None or open_event is None or open_event.closed
+            # A run recovered from the server log has no note and never will --
+            # the note lives only in the GUI log, which is precisely the thing
+            # that failed to write. Waiting on the GUI's open event for one is
+            # worse than pointless: that event belongs to an EARLIER run, so the
+            # `event.time != latest.started` test below restarted the settle
+            # timer on every poll and the run was never announced at all. Runs
+            # 213 to 217 sat unannounced for thirty-six hours behind run 212's
+            # start line, the last thing the GUI ever wrote.
+            settled = (latest.stopped is not None or latest.from_server_log
+                       or open_event is None or open_event.closed)
             if not settled:
                 if self._pending is None or self._pending.event.time != latest.started:
                     self._pending = PendingStart(open_event, time.time())
