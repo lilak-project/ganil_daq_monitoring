@@ -1,20 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import {
-  Alert,
-  Badge,
-  Box,
-  Card,
-  Container,
-  Group,
-  Paper,
-  ScrollArea,
-  Stack,
-  Table,
-  Text,
-  Title,
-  Tooltip,
-} from "@mantine/core"
-import { AlertTriangle, CircleDot, FileWarning, Radio } from "lucide-react"
+import { Table } from "@mantine/core"
+import { Brand, Flags, Hold, NoticeLine, Panel, Readout, Screen, Spacer, StateDot, Tag, ThemeSwitch } from "@neon"
 
 /* The shapes the backend sends. Kept minimal on purpose: this page renders the
    run status and nothing else, and a field it does not draw is a field that
@@ -161,218 +147,144 @@ export default function App() {
   const rate = status?.rate_bytes_per_s ?? null
 
   return (
-    <Container size="xl" py="lg">
-      <Group justify="space-between" align="flex-end" mb="md">
-        <Box>
-          <Title order={2}>GANIL DAQ</Title>
-          <Text size="sm" c="dimmed">
-            {status?.acq_root ?? "…"} · watched read-only
-          </Text>
-        </Box>
-        <Group gap="xs">
-          <Badge
-            size="lg"
-            variant={connected ? "light" : "filled"}
-            color={connected ? "gray" : "red"}
-          >
-            {connected ? "connected" : "service unreachable"}
-          </Badge>
-          <Badge
-            size="lg"
-            color={status?.daq_up ? "teal" : "red"}
-            variant={status?.daq_up ? "light" : "filled"}
-          >
+    <Screen
+      top={
+        <>
+          {/* It only reads files: there is no control surface here and cannot be one. */}
+          <Brand name="GANIL DAQ" readOnly />
+          <span className="faint">{status?.acq_root ?? "…"}</span>
+          <Spacer />
+          {/* Every wording reserved, so the bar never shifts (rule 5). */}
+          <StateDot tone={status?.daq_up ? "ok" : "alarm"} reserve={["DAQ up", "DAQ down"]}>
             {status?.daq_up ? "DAQ up" : "DAQ down"}
-          </Badge>
-        </Group>
-      </Group>
+          </StateDot>
+          <StateDot tone={connected ? "ok" : "warn"} reserve={["live", "reconnecting"]}>
+            {connected ? "live" : "reconnecting"}
+          </StateDot>
+          <ThemeSwitch />
+        </>
+      }
+    >
+      <div className="gn-stack">
+        {/* Always there (rule 5): a log that cannot be read fills this line. */}
+        <NoticeLine tone={status?.log_error ? "alarm" : null}>{status?.log_error ?? "Run-control logs read"}</NoticeLine>
 
-      {status?.log_error && (
-        <Alert color="red" icon={<AlertTriangle size={18} />} mb="md">
-          {status.log_error}
-        </Alert>
-      )}
-
-      {/* ── The run going now ─────────────────────────────────────────────── */}
-      <Card withBorder radius="md" padding="lg" mb="md">
-        {live ? (
-          <Stack gap="sm">
-            <Group justify="space-between" align="flex-start">
-              <Group gap="sm" align="center">
-                <Radio size={26} color="var(--mantine-color-teal-6)" />
-                <Title order={1} style={{ lineHeight: 1 }}>
-                  Run {live.run}
-                </Title>
-                <Badge color="teal" size="lg" variant="light">
-                  running
-                </Badge>
-              </Group>
-              <Text size="sm" c="dimmed">
-                started {localTime(live.started)}
-              </Text>
-            </Group>
-
-            {/* The note is the reason the run exists, so it is the biggest
-                thing on the card after the number. It is also the only part of
-                a GANIL run nobody can reconstruct afterwards. */}
-            <Paper withBorder radius="sm" p="md" bg="var(--mantine-color-gray-0)">
-              <Text style={{ whiteSpace: "pre-wrap" }} fw={500}>
-                {live.note || <Text span c="dimmed" fs="italic">started with no note</Text>}
-              </Text>
-            </Paper>
-
-            <Group gap="xl">
-              <Metric label="elapsed" value={humanDuration(live.elapsed_s)} />
-              <Metric label="written" value={humanSize(live.size)} />
-              <Metric
-                label="rate"
-                value={rate === null ? "measuring…" : `${humanSize(rate)}/s`}
+        {/* ── The run going now: the same box whether one is or not ─────── */}
+        <Panel
+          title={
+            // The run's number is a fact, lit while the run is open (rule 4).
+            <span className="gn-tags">
+              Run now
+              <Tag label="RUN" on={!!live}>{live ? live.run : "—"}</Tag>
+              <Tag label="STARTED">
+                <Hold reserve={["8888-88-88 오후 88:88:88", "—"]}>{live ? localTime(live.started) : "—"}</Hold>
+              </Tag>
+            </span>
+          }
+          actions={
+            <StateDot tone={live ? "ok" : "idle"} reserve={["running", "no run in progress"]}>
+              {live ? "running" : "no run in progress"}
+            </StateDot>
+          }
+        >
+          <div className="gn-stack">
+            {/* The note is the reason the run exists, and the one part of a
+                GANIL run nobody can reconstruct afterwards. */}
+            <div className={`gn-note${live?.note ? "" : " faint"}`}>
+              {live ? live.note || "started with no note" : `${status?.attempts ?? 0} attempts logged — the next run's note shows here.`}
+            </div>
+            <div className="gn-row">
+              <Readout label="Elapsed" value={<Hold reserve={["88h 88m"]}>{live ? humanDuration(live.elapsed_s) : "—"}</Hold>} />
+              <Readout label="Written" value={<Hold reserve={["888.8 GB"]}>{live ? humanSize(live.size) : "—"}</Hold>} />
+              <Readout
+                label="Rate"
+                value={<Hold reserve={["888.8 MB/s", "measuring…"]}>{!live ? "—" : rate === null ? "measuring…" : `${humanSize(rate)}/s`}</Hold>}
               />
-              <Metric label="files" value={String(live.files.length)} />
-            </Group>
+              <Readout label="Files" value={<Hold reserve={["888"]}>{live ? String(live.files.length) : "—"}</Hold>} />
+            </div>
+            {/* One line either way: the files, or why there are none. */}
+            <div className={`gn-files${live && live.files.length === 0 ? " tone-text-warn" : ""}`} title={live?.files.map((f) => f.name).join("\n")}>
+              {!live
+                ? "—"
+                : live.files.length > 0
+                  ? live.files.map((f) => f.name).join("  ·  ")
+                  : "No data file yet — storage may be off for this run."}
+            </div>
+          </div>
+        </Panel>
 
-            {live.files.length > 0 && (
-              <Text size="xs" c="dimmed" ff="monospace">
-                {live.files.map((f) => f.name).join("  ·  ")}
-              </Text>
-            )}
-            {live.files.length === 0 && (
-              <Text size="sm" c="orange.7">
-                No data file yet — storage may be off for this run.
-              </Text>
-            )}
-          </Stack>
-        ) : (
-          <Group gap="sm">
-            <CircleDot size={22} color="var(--mantine-color-gray-5)" />
-            <Text size="lg" c="dimmed">
-              No run in progress
-            </Text>
-            <Text size="sm" c="dimmed">
-              · {status?.attempts ?? 0} attempts logged
-            </Text>
-          </Group>
-        )}
-      </Card>
+        {/* ── The DAQ's components ──────────────────────────────────────── */}
+        <Panel title={`Components in ${status?.container ?? "the DAQ container"}`}>
+          <Flags
+            items={(status?.processes ?? []).map((process) => ({
+              label: process.label,
+              on: process.running,
+              tone: process.running ? ("ok" as const) : ("alarm" as const),
+              title: process.running ? `pid ${process.pid}` : "not running",
+            }))}
+          />
+        </Panel>
 
-      {/* ── The DAQ's components ──────────────────────────────────────────── */}
-      <Card withBorder radius="md" padding="md" mb="md">
-        <Text size="sm" fw={600} mb="xs">
-          Components in {status?.container ?? "the DAQ container"}
-        </Text>
-        <Group gap="xs">
-          {(status?.processes ?? []).map((process) => (
-            <Tooltip
-              key={process.label}
-              label={process.running ? `pid ${process.pid}` : "not running"}
-            >
-              <Badge
-                color={process.running ? "teal" : "red"}
-                variant={process.running ? "light" : "filled"}
-                size="sm"
-              >
-                {process.label}
-              </Badge>
-            </Tooltip>
-          ))}
-        </Group>
-      </Card>
-
-      {/* ── Every run taken ───────────────────────────────────────────────── */}
-      <Card withBorder radius="md" padding="md">
-        <Text size="sm" fw={600} mb="xs">
-          Runs · newest first
-        </Text>
-        <ScrollArea.Autosize mah={520}>
-          <Table stickyHeader highlightOnHover verticalSpacing="xs" fz="sm">
-            <Table.Thead>
-              <Table.Tr>
-                <Table.Th w={70}>Run</Table.Th>
-                <Table.Th w={190}>Started</Table.Th>
-                <Table.Th w={100}>Length</Table.Th>
-                <Table.Th w={110}>Size</Table.Th>
-                <Table.Th>Note</Table.Th>
-              </Table.Tr>
-            </Table.Thead>
-            <Table.Tbody>
-              {attempts.map((attempt) => (
-                <Table.Tr key={`${attempt.run}@${attempt.started}`}>
-                  <Table.Td>
-                    <Group gap={6} wrap="nowrap">
-                      <Text fw={600}>{attempt.run}</Text>
-                      {attempt.live && (
-                        <Badge size="xs" color="teal" variant="light">
-                          live
-                        </Badge>
-                      )}
-                      {attempt.from_server_log && (
-                        <Badge
-                          size="xs"
-                          color="gray"
-                          variant="light"
-                          title="The run-control GUI never logged this run; it was recovered from the server log (rcc.txt), which is why it has no note."
-                        >
-                          server log
-                        </Badge>
-                      )}
-                    </Group>
-                  </Table.Td>
-                  <Table.Td>{localTime(attempt.started)}</Table.Td>
-                  <Table.Td>{humanDuration(attempt.elapsed_s)}</Table.Td>
-                  <Table.Td>
-                    {attempt.files.length ? (
-                      humanSize(attempt.size)
-                    ) : (
-                      <Text span c="dimmed" size="xs">
-                        {attempt.storage_off ? "storage off" : "no file"}
-                      </Text>
-                    )}
-                  </Table.Td>
-                  <Table.Td>
-                    <Text size="sm" style={{ whiteSpace: "pre-wrap" }}>
-                      {attempt.note}
-                    </Text>
-                  </Table.Td>
+        {/* ── Every run taken ───────────────────────────────────────────── */}
+        <Panel title="Runs · newest first">
+          <div className="gn-runs">
+            <Table stickyHeader highlightOnHover verticalSpacing="xs">
+              <Table.Thead>
+                <Table.Tr>
+                  <Table.Th w={150}>Run</Table.Th>
+                  <Table.Th w={210}>Started</Table.Th>
+                  <Table.Th w={100}>Length</Table.Th>
+                  <Table.Th w={110}>Size</Table.Th>
+                  <Table.Th>Note</Table.Th>
                 </Table.Tr>
-              ))}
-            </Table.Tbody>
-          </Table>
-        </ScrollArea.Autosize>
-      </Card>
+              </Table.Thead>
+              <Table.Tbody>
+                {attempts.map((attempt) => (
+                  <Table.Tr key={`${attempt.run}@${attempt.started}`}>
+                    <Table.Td>
+                      <span className="gn-tags">
+                        <b className="tabular">{attempt.run}</b>
+                        {attempt.live ? <span className="tone-text-ok">live</span> : null}
+                        {attempt.from_server_log ? (
+                          <span
+                            className="faint"
+                            title="The run-control GUI never logged this run; it was recovered from the server log (rcc.txt), which is why it has no note."
+                          >
+                            server log
+                          </span>
+                        ) : null}
+                      </span>
+                    </Table.Td>
+                    <Table.Td className="tabular">{localTime(attempt.started)}</Table.Td>
+                    <Table.Td className="tabular">{humanDuration(attempt.elapsed_s)}</Table.Td>
+                    <Table.Td className="tabular">
+                      {attempt.files.length ? (
+                        humanSize(attempt.size)
+                      ) : (
+                        <span className="faint">{attempt.storage_off ? "storage off" : "no file"}</span>
+                      )}
+                    </Table.Td>
+                    <Table.Td style={{ whiteSpace: "pre-wrap" }}>{attempt.note}</Table.Td>
+                  </Table.Tr>
+                ))}
+              </Table.Tbody>
+            </Table>
+          </div>
+        </Panel>
 
-      {/* Files on disk that belong to no logged attempt. Small, and worth
-          saying: they are usually an aborted storage, but a run whose log
-          lines were rotated away looks exactly the same and is not. */}
-      {orphans.length > 0 && (
-        <Card withBorder radius="md" padding="md" mt="md">
-          <Group gap="xs" mb="xs">
-            <FileWarning size={16} />
-            <Text size="sm" fw={600}>
-              {orphans.length} file(s) matching no logged run
-            </Text>
-          </Group>
-          <Stack gap={2}>
+        {/* Files on disk that belong to no logged attempt -- last on the page,
+            so appearing pushes nothing. Usually an aborted storage, but a run
+            whose log lines were rotated away looks exactly the same. */}
+        {orphans.length > 0 ? (
+          <Panel title={`${orphans.length} file(s) matching no logged run`}>
             {orphans.map((file) => (
-              <Text key={file.name} size="xs" ff="monospace" c="dimmed">
+              <div key={file.name} className="gn-files">
                 {file.name} · {humanSize(file.size)}
-              </Text>
+              </div>
             ))}
-          </Stack>
-        </Card>
-      )}
-    </Container>
-  )
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <Box>
-      <Text size="xs" c="dimmed" tt="uppercase" fw={600}>
-        {label}
-      </Text>
-      <Text size="xl" fw={600} ff="monospace">
-        {value}
-      </Text>
-    </Box>
+          </Panel>
+        ) : null}
+      </div>
+    </Screen>
   )
 }

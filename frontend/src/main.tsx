@@ -4,15 +4,17 @@ import { MantineProvider } from "@mantine/core"
 
 import "@mantine/core/styles.css"
 import "./index.css"
+import "@neon/neon.css"
+import "./neon-ganil.css"
 
 import App from "./App.tsx"
-import { theme } from "./theme.ts"
+import { neonTheme } from "@neon/mantine"
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    {/* Light only: this is read on a lit counting-room wall, and a dark panel
-        washes out under the room lights. */}
-    <MantineProvider theme={theme} forceColorScheme="light">
+    {/* The DAQ look (neon_ui): Mantine stays in its dark scheme, NEON's tokens
+        draw it bright or dark. */}
+    <MantineProvider theme={neonTheme} forceColorScheme="dark">
       <App />
     </MantineProvider>
   </StrictMode>,

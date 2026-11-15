@@ -13,6 +13,8 @@ cannot be one: the only way to start or stop a GANIL run is the run-control GUI
 inside the `stark_daq` container, over X11. Read-only is not a policy this
 service enforces — it is the shape of the thing.
 
+The page is drawn with the NEON kit (`../neon_ui`), the DAQ screens' look.
+
 ## Where it reads
 
 Everything is on the host, under `/data1/ko2520/acquisition`. The DAQ runs in a

@@ -1,0 +1,11 @@
+/* GANIL on the DAQ look (neon_ui): only GANIL's own layout, on NEON's tokens. */
+.tabular { font-variant-numeric: tabular-nums; }
+.gn-stack { display: flex; flex-direction: column; gap: var(--neon-gap); }
+.gn-row { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 36px; }
+.gn-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+/* The note: the reason the run exists. Three lines of room whether there is a
+   run or not (NEON rule 5); a longer note scrolls inside them. */
+.gn-note { height: calc(3 * 1.5em + 16px); overflow: auto; padding: 8px 12px; background: var(--neon-raise); white-space: pre-wrap; line-height: 1.5; }
+.gn-files { font-family: var(--mantine-font-family-monospace); font-size: var(--neon-fs-small); color: var(--neon-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gn-runs { max-height: 520px; overflow: auto; }
+.gn-runs td { vertical-align: top; }
