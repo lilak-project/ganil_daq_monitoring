@@ -3,6 +3,7 @@ import { Brand, Choice, Tabs, Hold, NoticeLine, Panel, Readout, Screen, Spacer, 
 import { RunControl, type Rcc } from "./RunControl"
 import { Settings } from "./Settings"
 import { History } from "./History"
+import { Configuration } from "./Configuration"
 import { humanDuration, humanSize, localTime, type Attempt, type DataFile } from "./lib"
 
 /* The shapes the backend sends. Kept minimal on purpose: this page renders the
@@ -60,6 +61,7 @@ export default function App() {
   const [tab, setTab] = useState("run")
   const showSettings = control && tab === "settings"
   const showHistory = tab === "history"
+  const showConfig = tab === "config"
   useEffect(() => {
     const ask = () =>
       fetch("api/me")
@@ -147,9 +149,10 @@ export default function App() {
             items={[
               { value: "run", label: "Run" },
               { value: "history", label: "History", state: attempts.length ? `${attempts.length} runs` : undefined },
+              { value: "config", label: "Configuration" },
               ...(control ? [{ value: "settings", label: "Settings" }] : []),
             ]}
-            value={showSettings || showHistory ? tab : "run"}
+            value={showSettings || showHistory || showConfig ? tab : "run"}
             onChange={setTab}
           />
           {/* The experiment in use, as a fact (a tag, not a tab): its whole path is in the tooltip and in Settings. */}
@@ -179,7 +182,7 @@ export default function App() {
         </>
       }
     >
-      {showSettings ? <Settings /> : showHistory ? <History attempts={attempts} orphans={orphans} runDir={runDir} /> : <div className="gn-run">
+      {showSettings ? <Settings /> : showHistory ? <History attempts={attempts} orphans={orphans} runDir={runDir} /> : showConfig ? <Configuration path={status?.rcc?.config_file ?? null} /> : <div className="gn-run">
         {/* One screen: the run now and the run control side by side, the
             runs below them taking whatever height is left. */}
         <div className="gn-top">
@@ -207,15 +210,21 @@ export default function App() {
               {live ? live.note || "started with no note" : `${status?.attempts ?? 0} attempts logged — the next run's note shows here.`}
             </div>
             {/* The four numbers a shifter reads from across the room: big, two by two. */}
+            {/* What a shifter reads from across the room: the run and how long it has gone, biggest;
+                Elapsed in the accent, the one number that moves every second. */}
             <div className="gn-big">
-              <Readout size="hero" label="Elapsed" value={<Hold reserve={["88h 88m"]}>{live ? humanDuration(live.elapsed_s) : "—"}</Hold>} />
-              <Readout size="hero" label="Written" value={<Hold reserve={["888.8 GB"]}>{live ? humanSize(live.size) : "—"}</Hold>} />
+              <Readout size="hero" label="Run" value={<Hold reserve={["8888"]}>{live ? String(live.run) : "—"}</Hold>} />
+              <div className="gn-elapsed">
+                <Readout size="hero" label="Elapsed" value={<Hold reserve={["88h 88m"]}>{live ? humanDuration(live.elapsed_s) : "—"}</Hold>} />
+              </div>
+            </div>
+            <div className="gn-mid">
+              <Readout label="Written" value={<Hold reserve={["888.8 GB"]}>{live ? humanSize(live.size) : "—"}</Hold>} />
               <Readout
-                size="hero"
                 label="Rate"
                 value={<Hold reserve={["888.8 MB/s", "measuring…"]}>{!live ? "—" : rate === null ? "measuring…" : `${humanSize(rate)}/s`}</Hold>}
               />
-              <Readout size="hero" label="Files" value={<Hold reserve={["888"]}>{live ? String(live.files.length) : "—"}</Hold>} />
+              <Readout label="Files" value={<Hold reserve={["888"]}>{live ? String(live.files.length) : "—"}</Hold>} />
             </div>
             {/* One line always (rule 5): a log that cannot be read, the files, or why there are none. */}
             {status?.log_error ? (
@@ -242,6 +251,7 @@ export default function App() {
               title: process.running ? `pid ${process.pid}` : "not running",
             }))}
             container={status?.container ?? "the DAQ container"}
+            onOpenConfig={() => setTab("config")}
           />
         </div>
 

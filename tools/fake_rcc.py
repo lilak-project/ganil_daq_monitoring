@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 EQUIPMENT = [("ECC", "eccore"), ("NARVAL", "narval"), ("CoBo[0]", "actor"),
              ("Storage[0]", "storage"), ("Storage[1]", "storage")]
-STATE = {"sm": 1, "run": 100, "storage": {"Storage[0]": True, "Storage[1]": True}}
+STATE = {"sm": 1, "run": 100, "ecc": None, "storage": {"Storage[0]": True, "Storage[1]": True}}
 
 
 def answer(op: str, args: dict[str, str]) -> tuple[str, str]:
@@ -34,7 +34,9 @@ def answer(op: str, args: dict[str, str]) -> tuple[str, str]:
     if op == "rccStateMachine":
         return sm(STATE["sm"])
     if op == "rccEquipmentStateMachine":
-        return sm(STATE["sm"]) if any(n == name for n, _ in EQUIPMENT) else refuse(f'The equipment "{name}" does not exist', "rccResponseSM")
+        if not any(n == name for n, _ in EQUIPMENT):
+            return refuse(f'The equipment "{name}" does not exist', "rccResponseSM")
+        return sm(STATE["ecc"] if name == "ECC" and STATE["ecc"] is not None else STATE["sm"])
     if op == "rccGetEquipmentCount":
         return "rccResponseInt", f"{ok}<ns:value>{len(EQUIPMENT)}</ns:value>"
     if op == "rccGetEquipmentByIndex":
@@ -46,6 +48,8 @@ def answer(op: str, args: dict[str, str]) -> tuple[str, str]:
         return "rccResponseInt", f"{ok}<ns:value>{STATE['run']}</ns:value>"
     if op == "rccGetExperimentName":
         return "rccResponseString", f"{ok}<ns:value>fake</ns:value>"
+    if op == "rccGetExperimentCfgFile":
+        return "rccResponseString", f"{ok}<ns:value>/home/cens-alpha-00/ganacq_manip/fake/configurefiles/fake.rcc.xml</ns:value>"
     if op == "rccGetMonitoringState":
         return "rccResponseBool", f"{ok}<ns:value>true</ns:value>"
     if op == "rccInit":
@@ -65,6 +69,17 @@ def answer(op: str, args: dict[str, str]) -> tuple[str, str]:
         if any(STATE["storage"].values()):
             STATE["run"] += 1
         return "rccResponseString", f"{ok}<ns:value>Experiment stopped</ns:value>"
+    if op == "rccExit":
+        if STATE["sm"] in (3, 4):
+            return refuse("Operation forbidden")
+        STATE["sm"], STATE["ecc"] = 1, None
+        return "rccResponseString", f"{ok}<ns:value>Experiment exited</ns:value>"
+    if op == "rccEquipmentExit":
+        STATE["ecc"] = 1
+        return "rccResponseString", f'{ok}<ns:value>Equipment "{name}" exited</ns:value>'
+    if op == "rccEquipmentInit":
+        STATE["ecc"] = 2
+        return "rccResponseString", f'{ok}<ns:value>Equipment "{name}" initialized</ns:value>'
     if op in ("rccStorageOn", "rccStorageOff"):
         if STATE["sm"] != 2:
             return refuse("Storage mode can be changed only in READY state")

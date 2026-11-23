@@ -50,3 +50,23 @@
 .gn-recent td { padding: 3px 12px 3px 0; border-bottom: 1px solid var(--neon-line); white-space: nowrap; }
 .gn-recent td:first-child { width: 80px; }
 .gn-recent-note { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 0; width: 100%; }
+/* Run now: run number and elapsed big, the elapsed in the accent; the rest a size down. */
+.gn-big .neon-readout-value { font-size: clamp(40px, 5vw, 84px); }
+.gn-elapsed .neon-readout-value { color: var(--neon-accent); }
+.gn-mid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 24px; }
+.gn-mid .neon-readout-value { font-size: clamp(20px, 2vw, 30px); }
+/* A storage actor not writing: yellow (TONG's reserve colour, as minicom's heartbeat). */
+.gn-sun { color: #e0a800; }
+.gn-sun .neon-flag-mark { background: #e0a800; border-color: #e0a800; }
+:root:not([data-neon-theme="bright"]) .gn-sun { color: #ffd23f; }
+:root:not([data-neon-theme="bright"]) .gn-sun .neon-flag-mark { background: #ffd23f; border-color: #ffd23f; }
+.gn-note-input { width: 100%; text-align: left; }
+.gn-keys { display: flex; flex-wrap: wrap; gap: 8px 24px; }
+/* Run control keys: all one size, in pairs; storage and the run on a second row. */
+.gn-keys { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.gn-pair { display: inline-flex; gap: 4px; padding: 4px; border: 1px solid var(--neon-line); }
+.gn-pair .neon-command { width: 124px; justify-content: center; text-align: center; white-space: nowrap; }
+.gn-break { flex-basis: 100%; height: 0; }
+.gn-config { all: unset; cursor: pointer; font-family: var(--mantine-font-family-monospace); font-size: var(--neon-fs-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gn-config:hover:not(:disabled) { color: var(--neon-accent); text-decoration: underline; }
+.gn-raw { max-height: 60vh; overflow: auto; margin: 0; font-size: var(--neon-fs-small); white-space: pre; }

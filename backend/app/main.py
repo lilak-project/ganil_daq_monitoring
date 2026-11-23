@@ -143,11 +143,17 @@ async def me(request: Request) -> dict:
 @app.post("/api/rcc/{verb}", tags=["control"], summary="init | start | stop | storage-on | storage-off")
 async def command(verb: str, request: Request) -> dict:
     """Send one command to the run control, if its state allows it. Refused
-    commands come back ok=false with the reason, and are audited too."""
+    commands come back ok=false with the reason, and are audited too.
+    A start may carry {"note": "..."}: the run's note, as the GUI would ask."""
     if verb not in rcc.ALLOWED:
         raise HTTPException(status_code=404, detail=f"not a command: {verb}")
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    note = str(body.get("note", "")) if isinstance(body, dict) else ""
     caller = await run_in_threadpool(access.who, request)
-    return await run_in_threadpool(rcc.watch.command, verb, caller.get("name") or "standalone")
+    return await run_in_threadpool(rcc.watch.command, verb, caller.get("name") or "standalone", note)
 
 
 @app.get("/api/settings", tags=["control"], summary="The settings, the experiments to pick from, the first values")
@@ -170,6 +176,14 @@ async def write_settings(body: dict, request: Request) -> dict:
     rcc.record(caller.get("name") or "standalone", "settings", True,
                ", ".join(f"{k}={values[k]}" for k in changed) or "nothing changed")
     return {"values": values, "changed": changed}
+
+
+@app.get("/api/rcc/config", tags=["run"], summary="The configuration file the run control has loaded")
+async def rcc_config() -> dict:
+    try:
+        return await run_in_threadpool(rcc.config_text)
+    except rcc.RCCError as err:
+        raise HTTPException(status_code=502, detail=str(err)) from err
 
 
 @app.get("/api/audit", tags=["control"], summary="Commands sent, newest first")

@@ -31,7 +31,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
-from . import config
+from . import config, rcc
 from .rcclog import GuiEvent, iter_tail, parse_gui, parse_rcc
 from .runs import Attempt, DataFile, build_attempts, scan_data_files
 
@@ -132,6 +132,7 @@ class Monitor:
             self._read_logs()
             self._files = scan_data_files(config.RUN_DIR)
             self._attempts = build_attempts(self._all_events(), self._files, self._storage)
+            self._attach_page_notes()
             self._mark_orphans()
             self._sample_rate()
             self._last_poll = datetime.now(timezone.utc)
@@ -207,6 +208,22 @@ class Monitor:
     def _all_events(self) -> list[GuiEvent]:
         """Committed events plus the one still being written, which is the live run."""
         return self._events + ([self._open_event] if self._open_event else [])
+
+    def _attach_page_notes(self) -> None:
+        """A run started from this page with a note: the note is ours, not the
+        GUI's (rcc.py). It goes to the run with no note that started within
+        half a minute after it was written -- the Start it was sent with."""
+        page = rcc.notes()
+        if not page:
+            return
+        for attempt in self._attempts:
+            if attempt.note:
+                continue
+            started = attempt.started.timestamp()
+            for entry in reversed(page):
+                if 0 <= started - entry["at"] <= 30:
+                    attempt.note = entry["note"]
+                    break
 
     def _mark_orphans(self) -> None:
         claimed = {f.path for a in self._attempts for f in a.files}
