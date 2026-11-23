@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stop the GANIL DAQ monitoring service.
+# Stop the GANIL DAQ control service.
 #
 # Stopping it stops the watch, and a run boundary that happens while it is down
 # is not pushed to elog -- but it is not LOST either: the boundary is in

@@ -100,3 +100,11 @@ DAQ_PROCESSES: tuple[tuple[str, str], ...] = (
 #: The container the DAQ runs in. Only its name is used, and only to report
 #: whether it is up -- nothing is ever executed inside it.
 CONTAINER_NAME = os.environ.get("GANIL_CONTAINER", "stark_daq")
+
+#: The run-control server (RCC). The DAQ container shares the host's network,
+#: so it answers on the host; see rcc.py. Spoken to over SOAP, never by exec.
+RCC_HOST = os.environ.get("RCC_HOST", "127.0.0.1")
+RCC_PORT = int(os.environ.get("RCC_PORT", "6911"))
+RCC_TIMEOUT = float(os.environ.get("RCC_TIMEOUT", "5"))
+#: How often the RCC's state is asked. A SOAP question costs the DAQ nothing.
+RCC_POLL = float(os.environ.get("RCC_POLL", "3"))

@@ -9,3 +9,32 @@
 .gn-files { font-family: var(--mantine-font-family-monospace); font-size: var(--neon-fs-small); color: var(--neon-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gn-runs { max-height: 520px; overflow: auto; }
 .gn-runs td { vertical-align: top; }
+/* Settings: a label over its box, a hint under it. */
+.gn-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.gn-field-label { font-size: var(--neon-fs-small); color: var(--neon-dim); }
+.gn-field .neon-input.num { width: 160px; }
+.gn-field .neon-input.gn-wide { width: 100%; }
+.gn-field .neon-input.gn-wide { text-align: left; }
+/* The Run tab on one screen: run now | run control on top, the runs below
+   taking the rest of the height and scrolling inside it. */
+.gn-run { height: 100%; display: flex; flex-direction: column; gap: var(--neon-gap); min-height: 0; }
+.gn-top { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: var(--neon-gap); align-items: stretch; }
+@media (max-width: 1100px) { .gn-top { grid-template-columns: minmax(0, 1fr); } }
+.gn-run .gn-note { height: calc(2 * 1.5em + 12px); padding: 6px 10px; }
+.gn-run .gn-row { gap: 8px 28px; }
+.gn-run .neon-panel.fill { min-height: 200px; }
+.gn-run .neon-panel.fill > :last-child { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.gn-run .gn-runs { flex: 1; min-height: 0; max-height: none; }
+.gn-tight { gap: 6px; }
+.gn-tight .neon-flags { row-gap: 2px; }
+.gn-sub { font-size: var(--neon-fs-small); color: var(--neon-dim); margin-top: 2px; }
+.gn-tight .neon-flags { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); font-size: var(--neon-fs-small); }
+.gn-nowrap { white-space: nowrap; } .gn-nowrap .gn-tags { flex-wrap: nowrap; }
+/* History: a run row opens to its files. */
+.gn-right { text-align: right; }
+.gn-click { cursor: pointer; }
+.gn-caret { width: 1em; display: inline-block; }
+.gn-detail > td { background: var(--neon-raise); padding: 4px 12px 8px 36px; }
+.gn-filetable { font-size: var(--neon-fs-small); }
+.gn-path { font-family: var(--mantine-font-family-monospace); word-break: break-all; }
+.gn-orphans { max-height: 200px; overflow: auto; }

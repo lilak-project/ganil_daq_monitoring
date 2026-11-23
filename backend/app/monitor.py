@@ -101,6 +101,22 @@ class Monitor:
         if thread is not None:
             thread.join(timeout=5)
 
+    def reset(self) -> None:
+        """Forget everything read: the acquisition tree changed (settings.py).
+
+        The new tree is read as on a first start -- its finished runs are
+        adopted without being pushed to elog, a run still going is announced.
+        """
+        with self._lock:
+            self._events, self._open_event = [], None
+            self._attempts, self._files, self._orphans = [], [], []
+            self._errors, self._storage = [], []
+            self._gui_offset = self._rcc_offset = 0
+            self._pending = None
+            self._announced_start = self._announced_end = None
+            self._adopted = False
+            self._rate.clear()
+
     def _loop(self) -> None:
         while not self._stop.is_set():
             try:
@@ -193,8 +209,8 @@ class Monitor:
         return self._events + ([self._open_event] if self._open_event else [])
 
     def _mark_orphans(self) -> None:
-        claimed = {f.name for a in self._attempts for f in a.files}
-        self._orphans = [f for f in self._files if f.name not in claimed]
+        claimed = {f.path for a in self._attempts for f in a.files}
+        self._orphans = [f for f in self._files if f.path not in claimed]
 
     def _sample_rate(self) -> None:
         live = self.live_attempt()

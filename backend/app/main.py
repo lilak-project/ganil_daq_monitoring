@@ -1,12 +1,13 @@
-"""GANIL DAQ monitoring service.
+"""GANIL DAQ control service.
 
 Serves a JSON API plus a WebSocket status stream, and (once the frontend is
 built) the single-page UI from the same origin and port.
 
-There is no control surface here and there cannot be one: the only way to start
-or stop a GANIL run is the run-control GUI inside the container, over X11. This
-service reads the logs that GUI writes. Read-only is not a policy it enforces --
-it is the shape of the thing.
+Two halves. Monitoring reads the run-control logs and the run directory, and
+asks the run control (RCC) for its state over SOAP. Control sends the RCC Init,
+Start, Stop and storage on/off, over the same SOAP -- only for a portal manager
+or an admin of this service (access.py), each command gated on the state and
+written to the audit log (rcc.py).
 """
 
 from __future__ import annotations
@@ -16,13 +17,15 @@ import contextlib
 import logging
 from collections.abc import AsyncIterator
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 from starlette.types import Scope
 
-from . import elog
+from . import access, elog, rcc, settings
 from .config import BROADCAST_INTERVAL, DEFAULT_RUN_LIMIT, STATIC_DIR
 from .monitor import monitor
 
@@ -32,24 +35,27 @@ log = logging.getLogger("ganil")
 
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    settings.load()
     elog.install(monitor)
     monitor.start()
+    rcc.watch.start()
     if not elog.registered():
         log.info("not registered with elog yet; run boundaries will be watched but "
                  "not pushed. Register portal://ganil_daq_monitoring/api/elog.")
     try:
         yield
     finally:
+        rcc.watch.stop()
         monitor.stop()
 
 
 app = FastAPI(
-    title="GANIL DAQ Monitoring",
+    title="GANIL DAQ Control",
     description=(
         "Run status for the GANIL acquisition: which run is going, the note it "
         "was started with, what it is writing and how fast, and every run "
-        "already taken. Read-only — it watches the run-control logs and cannot "
-        "start, stop or configure anything."
+        "already taken; and, for a controller, the run control's Init, Start, "
+        "Stop and storage on/off."
     ),
     version="1.0.0",
     lifespan=lifespan,
@@ -69,6 +75,21 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.middleware("http")
+async def control_gate(request: Request, call_next):
+    """Monitoring callers may read everything and command nothing (access.py)."""
+    if access.needs_control(request):
+        caller = await run_in_threadpool(access.who, request)
+        if not caller["control"]:
+            return JSONResponse(status_code=403, content={
+                "detail": "Monitoring only: commanding the run control needs a portal manager or an admin of this service."})
+    return await call_next(request)
+
+
+def status_payload() -> dict:
+    return {**monitor.snapshot(), "rcc": rcc.watch.last()}
+
 
 # The LILAK elog handshake, and the credentials it posts back; see app/elog.py.
 app.include_router(elog.router)
@@ -108,9 +129,52 @@ async def live() -> dict:
     return {"ok": True, "items": items}
 
 
-@app.get("/api/status", tags=["run"], summary="The run going now, and the DAQ's components")
+@app.get("/api/status", tags=["run"], summary="The run going now, the DAQ's components, the run control's state")
 async def status() -> dict:
-    return monitor.snapshot()
+    return status_payload()
+
+
+@app.get("/api/me", tags=["meta"])
+async def me(request: Request) -> dict:
+    """Who is looking, and whether they may control (the page's mode switch)."""
+    return await run_in_threadpool(access.who, request)
+
+
+@app.post("/api/rcc/{verb}", tags=["control"], summary="init | start | stop | storage-on | storage-off")
+async def command(verb: str, request: Request) -> dict:
+    """Send one command to the run control, if its state allows it. Refused
+    commands come back ok=false with the reason, and are audited too."""
+    if verb not in rcc.ALLOWED:
+        raise HTTPException(status_code=404, detail=f"not a command: {verb}")
+    caller = await run_in_threadpool(access.who, request)
+    return await run_in_threadpool(rcc.watch.command, verb, caller.get("name") or "standalone")
+
+
+@app.get("/api/settings", tags=["control"], summary="The settings, the experiments to pick from, the first values")
+async def read_settings() -> dict:
+    return {"values": settings.current(), "defaults": settings.DEFAULTS, "saved": settings.saved(),
+            "experiments": settings.experiments(), "experiments_dir": str(settings.EXPERIMENTS_DIR)}
+
+
+@app.put("/api/settings", tags=["control"], summary="Save and apply at once")
+async def write_settings(body: dict, request: Request) -> dict:
+    try:
+        values, changed = await run_in_threadpool(settings.save, body)
+    except (ValueError, TypeError) as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    if "acq_root" in changed:
+        await run_in_threadpool(monitor.reset)
+    if {"rcc_host", "rcc_port"} & set(changed):
+        rcc.watch.forget_equipment()
+    caller = await run_in_threadpool(access.who, request)
+    rcc.record(caller.get("name") or "standalone", "settings", True,
+               ", ".join(f"{k}={values[k]}" for k in changed) or "nothing changed")
+    return {"values": values, "changed": changed}
+
+
+@app.get("/api/audit", tags=["control"], summary="Commands sent, newest first")
+async def audit(limit: int = 50) -> dict:
+    return {"entries": rcc.audit(max(1, min(limit, 500)))}
 
 
 @app.get("/api/runs", tags=["run"], summary="Every run attempt, newest first")
@@ -118,7 +182,9 @@ async def runs(limit: int = DEFAULT_RUN_LIMIT) -> dict:
     from datetime import datetime, timezone
     now = datetime.now(timezone.utc)
     attempts = monitor.attempts(limit=max(1, min(limit, 5000)))
+    from . import config
     return {
+        "run_dir": str(config.RUN_DIR),
         "attempts": [a.as_dict(now) for a in attempts],
         "orphan_files": [f.as_dict() for f in monitor.orphans()],
     }
@@ -132,12 +198,11 @@ async def errors(limit: int = 50) -> dict:
 
 @app.websocket("/ws/status")
 async def status_socket(socket: WebSocket) -> None:
-    """Push the live view. Nothing is read from the browser: there is nothing
-    it could ask this service to do."""
+    """Push the live view. Commands go over POST, never this socket."""
     await socket.accept()
     try:
         while True:
-            await socket.send_json(monitor.snapshot())
+            await socket.send_json(status_payload())
             await asyncio.sleep(BROADCAST_INTERVAL)
     except (WebSocketDisconnect, RuntimeError):
         return

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Start the GANIL DAQ monitoring server.
+"""Start the GANIL DAQ control server.
 
     python run.py                     # listen on the LAN, port 8008
     python run.py --port 8009
@@ -23,7 +23,7 @@ from app.net import browser_url, lan_addresses
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="GANIL DAQ monitoring server")
+    parser = argparse.ArgumentParser(description="GANIL DAQ control server")
     parser.add_argument("--host", default="0.0.0.0",
                         help="0.0.0.0 lets other PCs on the LAN connect")
     parser.add_argument("--port", type=int, default=8008)

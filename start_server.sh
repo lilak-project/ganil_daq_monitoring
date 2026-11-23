@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start the GANIL DAQ monitoring service in the background.
+# Start the GANIL DAQ control service in the background.
 #
 #   ./start_server.sh                 port 8008
 #   ./start_server.sh --port 8009

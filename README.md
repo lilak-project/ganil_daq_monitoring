@@ -1,4 +1,4 @@
-# GANIL DAQ Monitoring
+# GANIL DAQ Control
 
 Run status for the GANIL acquisition. Which run is going, the note it was
 started with, what it is writing and how fast, and every run already taken.
@@ -8,10 +8,23 @@ cd frontend && npm install && npm run build && cd ..
 ./start_server.sh              # http://<this-host>:8008
 ```
 
-It reads files and nothing else. There is no control surface here and there
-cannot be one: the only way to start or stop a GANIL run is the run-control GUI
-inside the `stark_daq` container, over X11. Read-only is not a policy this
-service enforces — it is the shape of the thing.
+Two modes, as minicom. **Monitor** (anyone the portal lets in) reads the
+run-control logs and the run directory, and asks the run control (RCC) for its
+state. **Control** (a portal manager, or an admin of this service) adds the
+RCC's Init, Start, Stop and storage on/off, and a Settings tab.
+
+The RCC is spoken to over **SOAP on the host** (port 6911; the DAQ container
+shares the host's network), the same SOAP the run-control GUI sends — never
+by `docker exec`, which leaves zombies in the container (below). A command is
+sent only from a state it is valid in (Start from READY, Stop from RUNNING or
+PAUSED, Init from OFFLINE/IDLE/READY, storage from READY), and every command
+and settings change is a line in `data/audit.jsonl`. Without a DAQ:
+`python3 tools/fake_rcc.py 16914` and `RCC_PORT=16914`.
+
+**Settings** (Control → Settings) pick the experiment — any folder beside the
+current one with `acquisition/log` in it — and the RCC's host, port and polling
+interval. They are saved in `data/settings.json` and applied at once; the
+environment below only gives the first values.
 
 The page is drawn with the NEON kit (`../neon_ui`), the DAQ screens' look.
 
@@ -209,9 +222,12 @@ Every setting is an environment variable, and nothing is required.
 | `GANIL_START_SETTLE` | seconds a start waits for its note (default 4) |
 | `GANIL_DATA_DIR` | where the elog credentials and the watch state live |
 | `GANIL_CONTAINER` | the container name shown on the page (default `stark_daq`) |
+| `RCC_HOST` / `RCC_PORT` | where the run control answers SOAP (default `127.0.0.1` / `6911`) |
+| `RCC_POLL` | seconds between questions to the run control (default 3) |
+| `GANIL_EXPERIMENTS_DIR` | where Settings looks for experiments (default two levels above `GANIL_ACQ_ROOT`) |
 
-Pointing it at another experiment is a matter of `GANIL_ACQ_ROOT`: the
-acquisition mount's `config_acq.txt` lists them.
+These are first values: Control → Settings overrides the experiment and the
+run control's address without a restart (`data/settings.json`).
 
 ## API
 

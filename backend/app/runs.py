@@ -29,6 +29,8 @@ _DATA_FILE = re.compile(
     r"(?P<h>\d{2})h(?P<m>\d{2})m(?P<s>\d{2})s"
     r"(?:\.(?P<part>\d+))?$"
 )
+#: Anything else in the run directory that names a run: merges and the like.
+_DERIVED = re.compile(r"^run_(?P<run>\d+)[_.]")
 
 #: How far from an attempt's start its file may be stamped and still be its
 #: file. Storage opens a few seconds BEFORE the GUI logs the start (the run
@@ -50,6 +52,12 @@ class DataFile:
     part: int
     size: int
     modified: datetime
+    #: Where it is, relative to the run directory: `cobo0/run_0240.dat…` when
+    #: each storage actor writes its own folder, just the name when not.
+    path: str = ""
+    #: A product made from the raw files afterwards (`run_0231_merged.dat`),
+    #: not something the DAQ wrote. It names its run but carries no start time.
+    derived: bool = False
 
     def as_dict(self) -> dict:
         data = asdict(self)
@@ -59,25 +67,41 @@ class DataFile:
 
 
 def scan_data_files(run_dir: Path) -> list[DataFile]:
-    """Every raw data file in the run directory, newest run first.
+    """Every data file of the run directory, its storage folders included.
 
-    `merged/` is a subdirectory and is not walked: those are ``.gmer`` products
-    of the raw files beside them, not runs of their own.
+    Each storage actor may write its own folder (`cobo0/`, `mutant/` on
+    grgroup), so the folders one level down are walked too -- except
+    `merged/`, whose `.gmer` files are products of the raw files, not runs.
+    Files in the run directory itself that name a run but are not raw output
+    (`run_0231_merged.dat`) are listed as derived, under their run.
     """
     files: list[DataFile] = []
     try:
-        entries = list(run_dir.iterdir())
+        entries = [(e, e.name) for e in run_dir.iterdir()]
     except OSError:
         return files
+    for folder in [e for e, _ in entries if e.is_dir() and e.name != "merged"]:
+        try:
+            entries += [(e, f"{folder.name}/{e.name}") for e in folder.iterdir()]
+        except OSError:
+            continue
 
-    for entry in entries:
+    for entry, rel in entries:
         match = _DATA_FILE.match(entry.name)
-        if not match:
+        derived = None if match or "/" in rel else _DERIVED.match(entry.name)
+        if not match and not derived:
             continue
         try:
             stat = entry.stat()
         except OSError:
             continue                      # vanished between listing and stat
+        if not entry.is_file():
+            continue
+        modified = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc)
+        if derived:
+            files.append(DataFile(name=entry.name, run=int(derived.group("run")), started=modified,
+                                  part=0, size=stat.st_size, modified=modified, path=rel, derived=True))
+            continue
         try:
             started = datetime(
                 2000 + int(match.group("year")), int(match.group("month")),
@@ -92,9 +116,10 @@ def scan_data_files(run_dir: Path) -> list[DataFile]:
             started=started,
             part=int(match.group("part") or 0),
             size=stat.st_size,
-            modified=datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc),
+            modified=modified,
+            path=rel,
         ))
-    files.sort(key=lambda f: (f.started, f.part))
+    files.sort(key=lambda f: (f.started, f.path, f.part))
     return files
 
 
@@ -251,7 +276,10 @@ def _attach_files(attempts: list[Attempt], files: list[DataFile]) -> None:
     for attempt in attempts:
         by_run.setdefault(attempt.run, []).append(attempt)
 
+    derived = [f for f in files if f.derived]
     for data in files:
+        if data.derived:
+            continue
         candidates = by_run.get(data.run)
         if not candidates:
             continue
@@ -263,8 +291,15 @@ def _attach_files(attempts: list[Attempt], files: list[DataFile]) -> None:
         if best is not None:
             best.files.append(data)
 
+    # A derived file names only its run: it goes to the last attempt at that
+    # number that wrote anything, which is the one it was made from.
+    for data in derived:
+        wrote = [a for a in by_run.get(data.run, []) if a.files]
+        if wrote:
+            wrote[-1].files.append(data)
+
     for attempt in attempts:
-        attempt.files.sort(key=lambda f: f.part)
+        attempt.files.sort(key=lambda f: (f.derived, f.path, f.part))
 
 
 def _attach_storage(attempts: list[Attempt], storage: list[StorageEvent]) -> None:
