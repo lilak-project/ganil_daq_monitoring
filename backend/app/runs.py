@@ -36,6 +36,8 @@ _DATA_FILE = re.compile(
 #: Five minutes is far longer than any observed gap and far shorter than the
 #: gap between two attempts at the same number.
 MATCH_WINDOW = timedelta(minutes=5)
+#: How far apart the GUI's line and the server's can be for one press.
+SERVER_ECHO = timedelta(seconds=30)
 
 
 @dataclass
@@ -181,42 +183,47 @@ def build_attempts(events: list[GuiEvent], files: list[DataFile],
 def _recover_missing(attempts: list[Attempt], storage: list[StorageEvent]) -> list[Attempt]:
     """Add the runs the GUI log never recorded, from the server log.
 
-    The GUI drops a start line now and then -- twice in three weeks here, run
-    #38 and run #203 -- and when it does, the run is invisible: no row, no live
-    view, nothing pushed to the logbook, while the DAQ writes the file quite
-    happily. rcc.txt always has it, because the server cannot start storage
-    without saying so.
+    The GUI log misses a run when the GUI drops the line (run #38, #203), and
+    always when the run was started some other way: a script, `ganil_rc`, a
+    SOAP client. rcc.txt has every one, because the server says `received
+    START` and `received STOP` whoever asked.
+
+    One attempt per `received START`. Its number is the one storage announced
+    just after (`Storage[n] : starting storage of run #N`, once per storage
+    actor -- so counted once, not once per actor). A run with storage off
+    announces none, so it gets the number the counter is at: one past the last
+    run that stored, since a run that stores nothing does not advance it.
 
     The GUI log stays the authority wherever it HAS the run: it is what the
     operator saw, and it is the only place the note exists. This fills gaps and
     never overrides. A recovered attempt is marked, because an empty note on it
     means "the GUI never wrote one", not "the operator left it blank".
     """
-    starts = [event for event in storage if event.mode == "starting" and event.run is not None]
+    starts = [e for e in storage if e.mode == "start"]
+    stops = [e.time for e in storage if e.mode == "stop"]
+    numbered = [e for e in storage if e.mode == "starting" and e.run is not None]
     if not starts:
         return attempts
 
     recovered: list[Attempt] = []
-    for index, event in enumerate(starts):
-        if any(a.run == event.run and abs(a.started - event.time) <= MATCH_WINDOW
+    for index, start in enumerate(starts):
+        following = starts[index + 1].time if index + 1 < len(starts) else None
+        number = next((e.run for e in numbered
+                       if start.time <= e.time <= start.time + SERVER_ECHO
+                       and (following is None or e.time < following)), None)
+        if any(abs(a.started - start.time) <= SERVER_ECHO
+               or (number is not None and a.run == number
+                   and abs(a.started - start.time) <= MATCH_WINDOW)
                for a in attempts):
             continue                      # the GUI has this one
-        # It ends where the server says storage stopped, or where the next run
-        # began -- a run whose successor has started is over, whatever was or
-        # was not logged.
-        stopped = None
-        for later in storage:
-            if later.time <= event.time or later.mode == "starting":
-                continue
-            if later.run is not None and later.run != event.run:
-                continue
-            stopped = later.time
-            break
-        following = starts[index + 1].time if index + 1 < len(starts) else None
-        if following is not None and (stopped is None or following < stopped):
-            stopped = following
-        recovered.append(Attempt(run=event.run, started=event.time, stopped=stopped,
-                                 from_server_log=True))
+        run = number
+        if run is None:
+            before = [e.run for e in numbered if e.time < start.time]
+            run = max(before) + 1 if before else 0
+        stopped = next((t for t in stops
+                        if t > start.time and (following is None or t <= following)), following)
+        recovered.append(Attempt(run=run, started=start.time, stopped=stopped,
+                                 storage_off=number is None, from_server_log=True))
 
     if not recovered:
         return attempts

@@ -52,6 +52,9 @@ _STORAGE_STOPPED = re.compile(
     re.IGNORECASE,
 )
 _STORAGE_STARTING = re.compile(r"starting storage of run\s*#?(\d+)", re.IGNORECASE)
+#: rcc.txt, whoever pressed it -- the GUI, a script, a SOAP client. The only
+#: trace a run started with storage off leaves: no run number, no file.
+_SERVER_VERB = re.compile(r"^received (START|STOP)$")
 
 
 def parse_stamp(line: str) -> datetime | None:
@@ -156,7 +159,7 @@ class StorageEvent:
     """One storage transition from rcc.txt."""
 
     time: datetime
-    mode: str                             # "on" | "off" | "starting"
+    mode: str                             # "on" | "off" | "starting" | "start" | "stop"
     run: int | None = None
     file: str | None = None
 
@@ -207,6 +210,11 @@ def parse_rcc(text: str, keep_errors: int = 200) -> RccFacts:
         if starting:
             facts.storage.append(StorageEvent(
                 time=stamp, mode="starting", run=int(starting.group(1))))
+            continue
+
+        verb = _SERVER_VERB.match(message)
+        if verb:
+            facts.storage.append(StorageEvent(time=stamp, mode=verb.group(1).lower()))
             continue
 
         if match.group("level") == "ERROR":
