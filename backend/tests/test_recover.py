@@ -35,6 +35,22 @@ def test_recover():
     ], got
 
 
+def test_half_written_line_is_left_for_next_read():
+    import tempfile
+    from pathlib import Path
+    log = Path(tempfile.mkdtemp()) / "rcc.txt"
+    log.write_bytes(b"(22:27:39 - 23/11/26) INFO - rcc - received START\n(23:06:06 - 23/11/26) INFO - rcc - received ST")
+    seen, offset = [], 0
+    for text, offset in rcclog.iter_tail(log, offset):
+        seen += rcclog.parse_rcc(text).storage
+    with log.open("ab") as handle:
+        handle.write(b"OP\n")
+    for text, offset in rcclog.iter_tail(log, offset):
+        seen += rcclog.parse_rcc(text).storage
+    assert [e.mode for e in seen] == ["start", "stop"], seen
+
+
 if __name__ == "__main__":
+    test_half_written_line_is_left_for_next_read()
     test_recover()
     print("ok")

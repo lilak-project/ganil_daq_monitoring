@@ -115,7 +115,8 @@ export function RunControl({
         </NoticeLine>
         <Flags
           items={(rcc?.equipment ?? []).map((item) => ({
-            label: item.type === "storage" ? `${item.name} ${item.storage_on ? "●" : "○"}` : item.name,
+            // A storage actor says whether it is writing in words: a dot was read as "on" either way.
+            label: item.type === "storage" ? `${item.name} · ${item.storage_on ? "rec" : "off"}` : item.name,
             on: item.state.code !== 0,
             tone: tone(item.state),
             title: `${item.type} · ${item.state.name}${item.type === "storage" ? ` · storage ${item.storage_on ? "on" : "off"}` : ""}`,

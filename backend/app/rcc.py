@@ -55,13 +55,13 @@ class RCCError(RuntimeError):
     pass
 
 
-def call(op: str, **args: object) -> dict[str, str]:
+def call(op: str, timeout: float | None = None, **args: object) -> dict[str, str]:
     """One SOAP operation. Returns the reply's fields; raises on a refusal."""
     body = "".join(f"<rcc:{k}>{escape(str(v))}</rcc:{k}>" for k, v in args.items())
     envelope = (f'<soap:Envelope xmlns:soap="{SOAP}" xmlns:rcc="{NS}"><soap:Body>'
                 f"<rcc:{op}>{body}</rcc:{op}></soap:Body></soap:Envelope>")
     try:
-        connection = HTTPConnection(config.RCC_HOST, config.RCC_PORT, timeout=config.RCC_TIMEOUT)
+        connection = HTTPConnection(config.RCC_HOST, config.RCC_PORT, timeout=timeout or config.RCC_TIMEOUT)
         try:
             connection.request("POST", "/", envelope.encode(),
                                {"Content-Type": "text/xml; charset=utf-8", "SOAPAction": '""'})
@@ -171,11 +171,13 @@ class Watch:
     @staticmethod
     def _send(verb: str, now: dict) -> str:
         if verb in ("init", "start", "stop"):
-            return call({"init": "rccInit", "start": "rccStart", "stop": "rccStop"}[verb]).get("value", "") or f"{verb} sent"
+            # A command answers when it is done: Stop took 9 s on grgroup, Init longer.
+            return call({"init": "rccInit", "start": "rccStart", "stop": "rccStop"}[verb],
+                        timeout=config.RCC_COMMAND_TIMEOUT).get("value", "") or f"{verb} sent"
         want = verb == "storage-on"
         names = [e["name"] for e in now["equipment"] if e["type"] == "storage" and e["storage_on"] != want]
         for name in names:
-            call("rccStorageOn" if want else "rccStorageOff", name=name)
+            call("rccStorageOn" if want else "rccStorageOff", timeout=config.RCC_COMMAND_TIMEOUT, name=name)
         return f"storage {'on' if want else 'off'}: {', '.join(names) or 'already'}"
 
     def start(self) -> None:

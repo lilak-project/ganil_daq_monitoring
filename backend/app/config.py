@@ -106,5 +106,7 @@ CONTAINER_NAME = os.environ.get("GANIL_CONTAINER", "stark_daq")
 RCC_HOST = os.environ.get("RCC_HOST", "127.0.0.1")
 RCC_PORT = int(os.environ.get("RCC_PORT", "6911"))
 RCC_TIMEOUT = float(os.environ.get("RCC_TIMEOUT", "5"))
+#: A command (Init, Start, Stop, storage) answers only when done; Stop took 9 s.
+RCC_COMMAND_TIMEOUT = float(os.environ.get("RCC_COMMAND_TIMEOUT", "120"))
 #: How often the RCC's state is asked. A SOAP question costs the DAQ nothing.
 RCC_POLL = float(os.environ.get("RCC_POLL", "3"))

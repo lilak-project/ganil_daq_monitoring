@@ -206,15 +206,16 @@ export default function App() {
             <div className={`gn-note${live?.note ? "" : " faint"}`}>
               {live ? live.note || "started with no note" : `${status?.attempts ?? 0} attempts logged — the next run's note shows here.`}
             </div>
-            <div className="gn-row">
-              <Readout size="text" label="Elapsed" value={<Hold reserve={["88h 88m"]}>{live ? humanDuration(live.elapsed_s) : "—"}</Hold>} />
-              <Readout size="text" label="Written" value={<Hold reserve={["888.8 GB"]}>{live ? humanSize(live.size) : "—"}</Hold>} />
+            {/* The four numbers a shifter reads from across the room: big, two by two. */}
+            <div className="gn-big">
+              <Readout size="hero" label="Elapsed" value={<Hold reserve={["88h 88m"]}>{live ? humanDuration(live.elapsed_s) : "—"}</Hold>} />
+              <Readout size="hero" label="Written" value={<Hold reserve={["888.8 GB"]}>{live ? humanSize(live.size) : "—"}</Hold>} />
               <Readout
-                size="text"
+                size="hero"
                 label="Rate"
                 value={<Hold reserve={["888.8 MB/s", "measuring…"]}>{!live ? "—" : rate === null ? "measuring…" : `${humanSize(rate)}/s`}</Hold>}
               />
-              <Readout size="text" label="Files" value={<Hold reserve={["888"]}>{live ? String(live.files.length) : "—"}</Hold>} />
+              <Readout size="hero" label="Files" value={<Hold reserve={["888"]}>{live ? String(live.files.length) : "—"}</Hold>} />
             </div>
             {/* One line always (rule 5): a log that cannot be read, the files, or why there are none. */}
             {status?.log_error ? (
@@ -243,6 +244,36 @@ export default function App() {
             container={status?.container ?? "the DAQ container"}
           />
         </div>
+
+        {/* The last few runs, so the screen below the numbers says what came before. The whole list, files and all, is History. */}
+        <Panel
+          fill
+          title="Recent runs"
+          actions={
+            <button type="button" className="neon-theme" onClick={() => setTab("history")}>
+              all {attempts.length} in History →
+            </button>
+          }
+        >
+          <div className="gn-runs">
+            <table className="gn-recent">
+              <tbody>
+                {attempts.slice(0, 30).map((attempt) => (
+                  <tr key={`${attempt.run}@${attempt.started}`}>
+                    <td className="tabular">
+                      <b>{attempt.run}</b>
+                      {attempt.live ? <span className="tone-text-ok"> live</span> : null}
+                    </td>
+                    <td className="tabular faint">{localTime(attempt.started)}</td>
+                    <td className="tabular">{humanDuration(attempt.elapsed_s)}</td>
+                    <td className="tabular gn-right">{attempt.files.length ? humanSize(attempt.size) : <span className="faint">{attempt.storage_off ? "storage off" : "no file"}</span>}</td>
+                    <td className="gn-recent-note">{attempt.note.split("\n")[0]}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Panel>
 
       </div>}
     </Screen>

@@ -241,7 +241,8 @@ def iter_tail(path, offset: int, limit: int = 4_000_000) -> Iterator[tuple[str, 
         offset = 0                        # rotated or truncated
     if size == offset:
         return
-    if size - offset > limit:
+    jumped = size - offset > limit
+    if jumped:
         # First read of a season's worth of log: take the tail, and start on a
         # line boundary so a half-line never parses as an event.
         offset = size - limit
@@ -251,8 +252,16 @@ def iter_tail(path, offset: int, limit: int = 4_000_000) -> Iterator[tuple[str, 
             raw = handle.read(size - offset)
     except OSError:
         return
-    if offset and b"\n" in raw:
+    if jumped and b"\n" in raw:
         skipped = raw.index(b"\n") + 1
         offset += skipped
         raw = raw[skipped:]
+    # Only whole lines. A line still being written is left for the next read:
+    # consumed now, its first half would parse as nothing and its second half
+    # never as a line -- which is how a `received STOP` was lost and a stopped
+    # run kept counting.
+    end = raw.rfind(b"\n") + 1
+    if end == 0:
+        return
+    raw = raw[:end]
     yield raw.decode("utf-8", errors="replace"), offset + len(raw)
