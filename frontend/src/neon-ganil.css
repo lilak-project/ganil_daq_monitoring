@@ -70,3 +70,30 @@
 .gn-config { all: unset; cursor: pointer; font-family: var(--mantine-font-family-monospace); font-size: var(--neon-fs-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .gn-config:hover:not(:disabled) { color: var(--neon-accent); text-decoration: underline; }
 .gn-raw { max-height: 60vh; overflow: auto; margin: 0; font-size: var(--neon-fs-small); white-space: pre; }
+/* ECC configuration sets: one row each, the selected one marked. */
+.gn-ecc { display: flex; flex-direction: column; gap: 6px; }
+.gn-eccset { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 6px; border: 1px solid transparent; }
+.gn-eccset.on { border-color: var(--neon-accent); }
+.gn-eccmark { width: 64px; font-size: var(--neon-fs-small); color: var(--neon-accent); }
+/* The xcfg tree, cconfiged's columns: Name | Value | Unit | Range | BL. Inherited in
+   the accent (cconfiged: blue), an own value overriding a default in pink (dark red). */
+.gn-tree { max-height: 65vh; overflow: auto; font-family: var(--mantine-font-family-monospace); font-size: var(--neon-fs-small); border: 1px solid var(--neon-line); }
+.gn-tree-row { display: grid; grid-template-columns: minmax(280px, 2fr) minmax(120px, 1fr) 70px minmax(90px, 0.6fr) 36px; gap: 8px; padding: 1px 8px; white-space: nowrap; }
+.gn-tree-row > span { overflow: hidden; text-overflow: ellipsis; }
+.gn-tree-head { position: sticky; top: 0; background: var(--neon-panel); color: var(--neon-dim); border-bottom: 1px solid var(--neon-line); z-index: 1; }
+.gn-tree-obj { cursor: pointer; }
+.gn-tree-obj:hover { background: var(--neon-raise); }
+.gn-tree-bl { text-align: right; }
+.gn-tree-unit, .gn-tree-range { color: var(--neon-dim); }
+.gn-tree-inh { color: var(--neon-accent); }
+.gn-tree-ovr { color: var(--neon-pink); }
+/* cconfiged's marks: bold names, red rows out of range; ours: an unsaved edit, a found row. */
+.gn-tree-bold { font-weight: 700; }
+.gn-tree-invalid { background: color-mix(in srgb, var(--neon-pink) 22%, transparent); }
+.gn-tree-dirty .gn-tree-val { text-decoration: underline; text-decoration-color: var(--neon-accent); font-weight: 700; }
+.gn-tree-hit { outline: 1px solid var(--neon-accent); }
+.gn-tree-edit { width: 100%; height: 20px; padding: 0 4px; font: inherit; text-align: left; }
+.gn-find { width: 260px; text-align: left; }
+.gn-hits { display: flex; flex-wrap: wrap; gap: 2px 12px; max-height: 120px; overflow: auto; font-family: var(--mantine-font-family-monospace); font-size: var(--neon-fs-small); }
+.gn-hit { all: unset; cursor: pointer; }
+.gn-hit:hover { color: var(--neon-accent); text-decoration: underline; }

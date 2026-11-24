@@ -9,6 +9,10 @@ export type Rcc = {
   at: number | null
   experiment?: string
   config_file?: string
+  /** The ECC configuration selected: {describe, prepare, configure}. */
+  ecc_config?: Record<string, string>
+  /** The ECC configuration sets on offer. */
+  ecc_choices?: Record<string, string>[]
   state?: RccState
   monitoring?: boolean
   run_number?: number | null
@@ -145,6 +149,11 @@ export function RunControl({
         <span className="faint">configuration </span>
         {rcc?.config_file ? rcc.config_file.split("/").pop() : "—"}
         <span className="faint">{rcc?.config_file ? `  ${rcc.config_file.slice(0, rcc.config_file.lastIndexOf("/") + 1)}` : ""}</span>
+      </button>
+      <button type="button" className="gn-config" title="Open in the Configuration tab" onClick={onOpenConfig} disabled={!rcc?.ecc_config?.configure}>
+        <span className="faint">ECC </span>
+        {rcc?.ecc_config?.configure ? `configure-${rcc.ecc_config.configure}.xcfg` : "—"}
+        <span className="faint">{rcc?.ecc_config?.describe ? `  · describe-${rcc.ecc_config.describe}.xcfg` : ""}</span>
       </button>
       <div className="gn-stack gn-tight">
         {/* One line always (rule 5): unreachable, the last command's answer, or what the state allows. */}

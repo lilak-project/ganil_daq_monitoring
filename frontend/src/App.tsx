@@ -182,7 +182,7 @@ export default function App() {
         </>
       }
     >
-      {showSettings ? <Settings /> : showHistory ? <History attempts={attempts} orphans={orphans} runDir={runDir} /> : showConfig ? <Configuration path={status?.rcc?.config_file ?? null} /> : <div className="gn-run">
+      {showSettings ? <Settings /> : showHistory ? <History attempts={attempts} orphans={orphans} runDir={runDir} /> : showConfig ? <Configuration path={status?.rcc?.config_file ?? null} eccConfig={status?.rcc?.ecc_config ?? null} eccChoices={status?.rcc?.ecc_choices ?? []} control={control} /> : <div className="gn-run">
         {/* One screen: the run now and the run control side by side, the
             runs below them taking whatever height is left. */}
         <div className="gn-top">

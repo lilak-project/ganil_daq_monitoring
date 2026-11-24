@@ -110,12 +110,22 @@ class Watch:
         #: is loaded, so it is re-read once a minute rather than every poll.
         self._equipment: list[tuple[str, str]] = []
         self._equipment_at = 0.0
+        self._ecc_choices: list[dict] = []
+        self._ecc_choices_at = 0.0
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
 
     def forget_equipment(self) -> None:
         """Another run control: its equipment list is asked afresh."""
         self._equipment = []
+        self._ecc_choices_at = 0.0
+
+    def _ecc_config(self) -> dict:
+        ecc = next((n for n, k in self._equipment if k in ("eccore", "ecc")), None)
+        if not ecc:
+            return {}
+        found = _config_ids(call("rccGetECCoreConfigID", name=ecc)["value"])
+        return found[0] if found else {}
 
     def last(self) -> dict:
         with self._lock:
@@ -129,6 +139,10 @@ class Watch:
                 self._equipment = [(e["name"], e.get("typestr", "")) for e in
                                    (call("rccGetEquipmentByIndex", index=i) for i in range(count))]
                 self._equipment_at = time.time()
+            if not self._ecc_choices_at or time.time() - self._ecc_choices_at > 60:
+                ecc = next((n for n, k in self._equipment if k in ("eccore", "ecc")), None)
+                self._ecc_choices = _config_ids(call("rccECCoreGetConfigIDs", name=ecc)["value"]) if ecc else []
+                self._ecc_choices_at = time.time()
             equipment = []
             storages = []
             for name, kind in self._equipment:
@@ -147,6 +161,10 @@ class Watch:
                 "experiment": call("rccGetExperimentName")["value"],
                 # The configuration loaded, as a path inside the DAQ container.
                 "config_file": call("rccGetExperimentCfgFile")["value"],
+                # The ECC configuration the run control has selected (describe /
+                # prepare / configure), and the sets the ECC offers.
+                "ecc_config": self._ecc_config(),
+                "ecc_choices": self._ecc_choices,
                 "state": _state(call("rccStateMachine")),
                 "monitoring": call("rccGetMonitoringState")["value"] == "true",
                 "run_number": run,
@@ -234,6 +252,214 @@ def record(who: str, verb: str, ok: bool, reply: str) -> None:
         log.exception("could not write the audit line")
 
 
+def _config_ids(text: str) -> list[dict]:
+    """`<ConfigId><SubConfigId type="describe">x</SubConfigId>…</ConfigId>`, one
+    dict per ConfigId: {describe: x, prepare: y, configure: z}."""
+    import re
+
+    return [dict(re.findall(r'<SubConfigId type="([^"]+)">([^<]*)</SubConfigId>', block))
+            for block in re.findall(r"<ConfigId>(.*?)</ConfigId>", text, re.S)]
+
+
+def _docker_read(path: str, limit: int = 4_000_000) -> str:
+    """One file out of the DAQ container with `docker cp`: the daemon copies
+    it out, nothing runs inside the container (config.py)."""
+    import io
+    import subprocess
+    import tarfile
+
+    try:
+        out = subprocess.run(["docker", "cp", f"{config.CONTAINER_NAME}:{path}", "-"],
+                             capture_output=True, timeout=20, check=True).stdout
+        with tarfile.open(fileobj=io.BytesIO(out)) as archive:
+            member = archive.next()
+            if member is None or not member.isfile():
+                raise RCCError(f"{path} is not a file")
+            if member.size > limit:
+                raise RCCError(f"{path} is {member.size} bytes, too large to show")
+            return archive.extractfile(member).read().decode("utf-8", errors="replace")
+    except (OSError, subprocess.SubprocessError, tarfile.TarError) as err:
+        detail = getattr(err, "stderr", b"") or b""
+        raise RCCError(f"could not read {path} from {config.CONTAINER_NAME}: "
+                       f"{detail.decode(errors='replace').strip() or err}") from err
+
+
+def _docker_get(path: str, limit: int = 4_000_000) -> tuple[bytes, "object"]:
+    """One file out of the DAQ container (`docker cp`), with its tar header --
+    owner, group and mode, so a save can put them back as they were."""
+    import io
+    import subprocess
+    import tarfile
+
+    try:
+        out = subprocess.run(["docker", "cp", f"{config.CONTAINER_NAME}:{path}", "-"],
+                             capture_output=True, timeout=20, check=True).stdout
+        with tarfile.open(fileobj=io.BytesIO(out)) as archive:
+            member = archive.next()
+            if member is None or not member.isfile():
+                raise RCCError(f"{path} is not a file")
+            if member.size > limit:
+                raise RCCError(f"{path} is {member.size} bytes, too large")
+            return archive.extractfile(member).read(), member
+    except (OSError, subprocess.SubprocessError, tarfile.TarError) as err:
+        detail = getattr(err, "stderr", b"") or b""
+        raise RCCError(f"could not read {path} from {config.CONTAINER_NAME}: "
+                       f"{detail.decode(errors='replace').strip() or err}") from err
+
+
+def _docker_put(path: str, data: bytes, like) -> None:
+    """Write a file into the DAQ container with `docker cp -a`, owner, group and
+    mode copied from `like` (the tar header it was read with). The daemon
+    writes it; nothing runs inside the container."""
+    import io
+    import posixpath
+    import subprocess
+    import tarfile
+
+    info = tarfile.TarInfo(posixpath.basename(path))
+    info.size, info.mode, info.mtime = len(data), like.mode, time.time()
+    info.uid, info.gid, info.uname, info.gname = like.uid, like.gid, like.uname, like.gname
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w") as archive:
+        archive.addfile(info, io.BytesIO(data))
+    try:
+        subprocess.run(["docker", "cp", "-a", "-", f"{config.CONTAINER_NAME}:{posixpath.dirname(path)}"],
+                       input=buffer.getvalue(), capture_output=True, timeout=20, check=True)
+    except (OSError, subprocess.SubprocessError) as err:
+        detail = getattr(err, "stderr", b"") or b""
+        raise RCCError(f"could not write {path} into {config.CONTAINER_NAME}: "
+                       f"{detail.decode(errors='replace').strip() or err}") from err
+
+
+def ecc_file(step: str, name: str) -> dict:
+    """An ECC configuration file (`configure-AlphaTest-Nov12-2026.xcfg`).
+
+    They sit in the experiment's `configurefiles/`, in a folder per step
+    (`describe/`, `configure/`) or loose beside it. Prepare has no files of
+    its own on these setups: it reads the configure file of the same name.
+    """
+    import posixpath
+    import re
+
+    if step not in ("describe", "prepare", "configure") or not re.fullmatch(r"[\w.+-]+", name):
+        raise ValueError("not an ECC configuration")
+    rcc_file = watch.last().get("config_file") or call("rccGetExperimentCfgFile")["value"]
+    cut = rcc_file.find("/configurefiles/")
+    base = rcc_file[:cut + len("/configurefiles")] if cut >= 0 else posixpath.dirname(rcc_file)
+    tried = []
+    for kind in ([step, "configure"] if step == "prepare" else [step]):
+        for path in (f"{base}/{kind}/{kind}-{name}.xcfg", f"{base}/{kind}-{name}.xcfg"):
+            tried.append(path)
+            try:
+                data, _ = _docker_get(path)
+            except RCCError:
+                continue
+            import hashlib
+            return {"step": step, "name": name, "path": path, "text": data.decode("utf-8", errors="replace"),
+                    "sha": hashlib.sha256(data).hexdigest()}
+    raise RCCError("not found: " + ", ".join(tried))
+
+
+_trees: dict[tuple[str, str], tuple[float, object]] = {}
+
+
+def ecc_tree(step: str, name: str, keys: list[tuple[str, str]]) -> dict:
+    """What one object of an ECC configuration holds once its defaults are
+    applied -- what cconfiged shows (xcfg.py). Files are read again after a
+    minute, so an edit shows without a restart."""
+    from . import xcfg
+
+    cached = _trees.get((step, name))
+    if cached is None or time.time() - cached[0] > 60:
+        found = ecc_file(step, name)
+        cached = (time.time(), (found["path"], xcfg.parse(found["text"].encode()), found["sha"]))
+        _trees[(step, name)] = cached
+    path, root, sha = cached[1]
+    return {"path": path, "sha": sha, "root": root.name + (f"[{root.index}]" if root.index else ""),
+            "rows": xcfg.children(root, keys)}
+
+
+def ecc_find(step: str, name: str, query: str, limit: int = 200) -> dict:
+    """Every object or value in the file, as written, whose name, index or value
+    holds `query` (cconfiged's Find): paths to open the tree at."""
+    from . import xcfg
+
+    ecc_tree(step, name, [])                     # load (and cache) the file
+    _, (path, root, sha) = _trees[(step, name)]
+    q = query.strip().lower()
+    hits: list[dict] = []
+
+    def walk(node, keys):
+        for child in node.children:
+            k = keys + [[child.name, child.index]]
+            label = f"{child.name}[{child.index}]" if child.index else child.name
+            if q and (q in label.lower() or (child.value is not None and q in child.value.lower())):
+                hits.append({"keys": k, "label": ".".join(f"{n}[{i}]" if i else n for n, i in k),
+                             "value": child.value})
+                if len(hits) >= limit:
+                    return True
+            if walk(child, k):
+                return True
+        return False
+
+    walk(root, [])
+    return {"hits": hits, "truncated": len(hits) >= limit}
+
+
+def ecc_save(step: str, name: str, sha: str, edits: list[dict], who: str) -> dict:
+    """Write edited values into an ECC configuration, in place.
+
+    Only the text of each edited value changes; the rest of the file stays as
+    it was, byte for byte. Refused when the file changed since it was read
+    (`sha`), when a value is not this object's own (inherited values are
+    overridden first), or when a value is outside its range. The previous file
+    is kept in DATA_DIR/xcfg-backups first; every save is audited.
+    """
+    import hashlib
+    from xml.sax.saxutils import escape as xml_escape
+    from . import xcfg
+
+    found = ecc_file(step, name)
+    path = found["path"]
+    data, like = _docker_get(path)
+    if hashlib.sha256(data).hexdigest() != sha:
+        raise RCCError("the file changed since it was opened (someone saved it); reopen it and edit again")
+    root = xcfg.parse(data)
+    splices = []
+    for edit in edits:
+        keys = [tuple(k) for k in edit["keys"]]
+        value = str(edit["value"]).strip()
+        hit = xcfg._config(root, keys)
+        label = ".".join(f"{n}[{i}]" if i else n for n, i in keys)
+        if hit is None:
+            raise ValueError(f"{label}: not in the file")
+        node, level = hit
+        if level != 0 or node.is_object or node.span is None:
+            raise ValueError(f"{label}: not a value of its own (override it first)")
+        if not xcfg.in_range(value, xcfg.parse_range(node.attrs.get("range"))):
+            raise ValueError(f"{label}: {value!r} is outside {node.attrs.get('range')}")
+        splices.append((node.span, xml_escape(value).encode(), label, node.value, value))
+    if not splices:
+        raise ValueError("nothing to save")
+    new = data
+    for (start, end), text, *_ in sorted(splices, key=lambda x: x[0][0], reverse=True):
+        new = new[:start] + text + new[end:]
+    xcfg.parse(new)                              # still a file CompoundConfig can read
+    backups = config.DATA_DIR / "xcfg-backups"
+    backups.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    backup = backups / f"{path.rsplit('/', 1)[-1]}.{stamp}"
+    backup.write_bytes(data)
+    _docker_put(path, new, like)
+    check, _ = _docker_get(path)
+    if check != new:
+        raise RCCError(f"{path}: what was written does not read back the same; the previous file is {backup}")
+    _trees.pop((step, name), None)
+    changes = ", ".join(f"{label}: {old} -> {value}" for _, _, label, old, value in splices)
+    record(who, "xcfg-save", True, f"{path}: {changes} (backup {backup.name})")
+    return {"path": path, "sha": hashlib.sha256(new).hexdigest(), "backup": str(backup), "changed": len(splices)}
+
+
 def _ecc(now: dict) -> str:
     """The ECC equipment's name (`ECC` on the GANIL setups)."""
     return next((e["name"] for e in now["equipment"] if e["type"] in ("eccore", "ecc")), "ECC")
@@ -262,31 +488,12 @@ def notes() -> list[dict]:
     return [json.loads(line) for line in lines if line.strip()]
 
 
-def config_text(limit: int = 4_000_000) -> dict:
-    """The configuration file the run control has loaded, read out of the
-    container with `docker cp` -- the daemon copies it out; nothing runs
-    inside the container, so no zombie is left (config.py)."""
-    import io
-    import subprocess
-    import tarfile
-
+def config_text() -> dict:
+    """The configuration file the run control has loaded, read out of the container."""
     path = watch.last().get("config_file") or call("rccGetExperimentCfgFile")["value"]
     if not path:
         raise RCCError("the run control has no configuration loaded")
-    try:
-        out = subprocess.run(["docker", "cp", f"{config.CONTAINER_NAME}:{path}", "-"],
-                             capture_output=True, timeout=20, check=True).stdout
-        with tarfile.open(fileobj=io.BytesIO(out)) as archive:
-            member = archive.next()
-            if member is None or not member.isfile():
-                raise RCCError(f"{path} is not a file")
-            if member.size > limit:
-                raise RCCError(f"{path} is {member.size} bytes, too large to show")
-            text = archive.extractfile(member).read().decode("utf-8", errors="replace")
-    except (OSError, subprocess.SubprocessError, tarfile.TarError) as err:
-        detail = getattr(err, "stderr", b"") or b""
-        raise RCCError(f"could not read {path} from {config.CONTAINER_NAME}: "
-                       f"{detail.decode(errors='replace').strip() or err}") from err
+    text = _docker_read(path)
     return {"path": path, "container": config.CONTAINER_NAME, "text": text, **parse_config(text)}
 
 

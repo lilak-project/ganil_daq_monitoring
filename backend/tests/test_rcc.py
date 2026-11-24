@@ -25,6 +25,8 @@ def test_gate_and_commands():
         snap = watch.read()
         assert snap["reachable"] and snap["state"]["name"] == "IDLE" and snap["storage"] == "on", snap
         assert len(snap["equipment"]) == 5
+        assert snap["ecc_config"]["configure"] == "MeshPulser"
+        assert [c["configure"] for c in snap["ecc_choices"]] == ["AllOff", "MeshPulser"]
 
         assert not watch.command("start", "t")["ok"]            # IDLE: refused here, not sent
         assert watch.command("init", "t")["ok"]

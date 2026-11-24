@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import re
 import sys
+from xml.sax.saxutils import escape
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 EQUIPMENT = [("ECC", "eccore"), ("NARVAL", "narval"), ("CoBo[0]", "actor"),
@@ -50,6 +51,10 @@ def answer(op: str, args: dict[str, str]) -> tuple[str, str]:
         return "rccResponseString", f"{ok}<ns:value>fake</ns:value>"
     if op == "rccGetExperimentCfgFile":
         return "rccResponseString", f"{ok}<ns:value>/home/cens-alpha-00/ganacq_manip/fake/configurefiles/fake.rcc.xml</ns:value>"
+    if op in ("rccGetECCoreConfigID", "rccECCoreGetConfigIDs"):
+        one = '<ConfigId><SubConfigId type="describe">fake-Production</SubConfigId><SubConfigId type="prepare">{0}</SubConfigId><SubConfigId type="configure">{0}</SubConfigId></ConfigId>'
+        text = one.format("MeshPulser") if op == "rccGetECCoreConfigID" else "<ConfigIdSet>" + one.format("AllOff") + one.format("MeshPulser") + "</ConfigIdSet>"
+        return "rccResponseString", f"{ok}<ns:value>{escape(text)}</ns:value>"
     if op == "rccGetMonitoringState":
         return "rccResponseBool", f"{ok}<ns:value>true</ns:value>"
     if op == "rccInit":

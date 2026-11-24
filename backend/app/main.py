@@ -186,6 +186,52 @@ async def rcc_config() -> dict:
         raise HTTPException(status_code=502, detail=str(err)) from err
 
 
+@app.get("/api/rcc/ecc-file", tags=["run"], summary="An ECC configuration file (.xcfg), by step and name")
+async def rcc_ecc_file(step: str, name: str) -> dict:
+    try:
+        return await run_in_threadpool(rcc.ecc_file, step, name)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    except rcc.RCCError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@app.get("/api/rcc/ecc-tree", tags=["run"], summary="One object of an ECC configuration, defaults applied (as cconfiged)")
+async def rcc_ecc_tree(step: str, name: str, path: str = "[]") -> dict:
+    """`path` is a JSON list of [name, index] pairs below the root, [] for the root."""
+    import json as _json
+    try:
+        keys = [(str(n), str(i)) for n, i in _json.loads(path)]
+        return await run_in_threadpool(rcc.ecc_tree, step, name, keys)
+    except (ValueError, TypeError) as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    except rcc.RCCError as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@app.get("/api/rcc/ecc-find", tags=["run"], summary="Find objects and values in an ECC configuration")
+async def rcc_ecc_find(step: str, name: str, q: str) -> dict:
+    try:
+        return await run_in_threadpool(rcc.ecc_find, step, name, q)
+    except (ValueError, rcc.RCCError) as err:
+        raise HTTPException(status_code=404, detail=str(err)) from err
+
+
+@app.put("/api/rcc/ecc-file", tags=["control"], summary="Save edited values into an ECC configuration (backed up first)")
+async def rcc_ecc_save(body: dict, request: Request) -> dict:
+    """{step, name, sha (of the file as opened), edits: [{keys, value}]}"""
+    caller = await run_in_threadpool(access.who, request)
+    who = caller.get("name") or "standalone"
+    try:
+        return await run_in_threadpool(rcc.ecc_save, str(body.get("step")), str(body.get("name")),
+                                       str(body.get("sha")), list(body.get("edits") or []), who)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
+    except rcc.RCCError as err:
+        rcc.record(who, "xcfg-save", False, str(err))
+        raise HTTPException(status_code=409, detail=str(err)) from err
+
+
 @app.get("/api/audit", tags=["control"], summary="Commands sent, newest first")
 async def audit(limit: int = 50) -> dict:
     return {"entries": rcc.audit(max(1, min(limit, 500)))}

@@ -2,6 +2,8 @@ import { Fragment, useEffect, useState } from "react"
 import { Table } from "@mantine/core"
 import { Command, Facts, NoticeLine, Panel } from "@neon"
 
+import { XcfgTree } from "./XcfgTree"
+
 type Parameter = { name: string; value?: string; type?: string; permission?: string; dynamic?: string }
 type Equipment = {
   kind: string
@@ -29,11 +31,46 @@ const MAIN = ["hostname", "port", "executable_file", "log_level"]
  * use, every equipment with its parameters, and the links between them. The
  * raw XML is a press away.
  */
-export function Configuration({ path }: { path: string | null }) {
+type EccFile = { step: string; name: string; path: string; text: string }
+
+export function Configuration({
+  path,
+  eccConfig,
+  eccChoices,
+  control,
+}: {
+  path: string | null
+  /** Editing is for a controller. */
+  control: boolean
+  eccConfig: Record<string, string> | null
+  eccChoices: Record<string, string>[]
+}) {
   const [config, setConfig] = useState<Config | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState<Set<string>>(new Set())
   const [raw, setRaw] = useState(false)
+  const [file, setFile] = useState<EccFile | null>(null)
+  const [fileError, setFileError] = useState<string | null>(null)
+  /** The file as cconfiged shows it (defaults applied), or as written. */
+  const [fileView, setFileView] = useState<"tree" | "text">("tree")
+  const openFile = async (step: string, name: string) => {
+    setFileError(null)
+    try {
+      const answer = await fetch(`api/rcc/ecc-file?step=${encodeURIComponent(step)}&name=${encodeURIComponent(name)}`)
+      const data = await answer.json()
+      if (!answer.ok) throw new Error(data.detail ?? answer.statusText)
+      setFile(data)
+    } catch (err) {
+      setFile(null)
+      setFileError(String(err instanceof Error ? err.message : err))
+    }
+  }
+  // The selected ECC configure file opens by itself, and again when the selection changes.
+  useEffect(() => {
+    if (eccConfig?.configure) void openFile("configure", eccConfig.configure)
+  }, [eccConfig?.configure])
+  const STEPS = ["describe", "prepare", "configure"]
+  const same = (a: Record<string, string>, b: Record<string, string> | null) => !!b && STEPS.every((k) => a[k] === b[k])
 
   const load = async () => {
     setError(null)
@@ -80,7 +117,42 @@ export function Configuration({ path }: { path: string | null }) {
         </NoticeLine>
         <div className="gn-path">{config?.path ?? path ?? "—"}</div>
         {ecc?.ecc_configs ? (
-          <Facts items={Object.entries(ecc.ecc_configs).map(([step, name]) => [`ECC ${step}`, <b key={step}>{name}</b>])} />
+          // What the .rcc.xml file says, which is not always what is selected now (ECC configuration, below).
+          <Facts items={Object.entries(ecc.ecc_configs).map(([step, name]) => [`ECC ${step} · in this file`, <b key={step}>{name}</b>])} />
+        ) : null}
+      </Panel>
+
+      {/* The ECC's own configuration (.xcfg): the set the run control has selected, the sets the
+          ECC offers, and the file picked -- the selected configure file unless another is pressed. */}
+      <Panel title="ECC configuration">
+        <div className="gn-ecc">
+          {(eccChoices.length ? eccChoices : eccConfig ? [eccConfig] : []).map((set, i) => (
+            <div key={i} className={`gn-eccset${same(set, eccConfig) ? " on" : ""}`}>
+              <span className="gn-eccmark">{same(set, eccConfig) ? "selected" : ""}</span>
+              {STEPS.map((step) =>
+                set[step] ? (
+                  <Command key={step} small on={file?.step === step && file?.name === set[step]} onRun={() => void openFile(step, set[step])}>
+                    <span className="faint">{step} </span>
+                    {set[step]}
+                  </Command>
+                ) : null,
+              )}
+            </div>
+          ))}
+        </div>
+        <NoticeLine tone={fileError ? "warn" : null}>{fileError ?? (file ? file.path : "Press a configuration to read its file.")}</NoticeLine>
+        {file ? (
+          <>
+            <span className="gn-tags">
+              <Command small on={fileView === "tree"} onRun={() => setFileView("tree")}>
+                Tree (as cconfiged)
+              </Command>
+              <Command small on={fileView === "text"} onRun={() => setFileView("text")}>
+                File as written
+              </Command>
+            </span>
+            {fileView === "tree" ? <XcfgTree step={file.step} name={file.name} control={control} /> : <pre className="gn-raw">{file.text}</pre>}
+          </>
         ) : null}
       </Panel>
 
